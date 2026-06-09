@@ -44,3 +44,23 @@ keyboard_handler:
     call keyboard_handler_main ; C dilindeki asıl fonksiyonumuzu çağır
     popa                     ; Kayıtçıları eski haline geri yükle
     iretd                    ; Kesme işleminden geri dön (Interrupt Return - 32 bit)
+    ; --- SAYFALAMA (PAGING) AKTİFLEŞTİRİCİ ---
+global enable_paging
+
+enable_paging:
+    push ebp
+    mov ebp, esp
+    
+    ; C fonksiyonundan gönderilen Page Directory adresini al
+    mov eax, [ebp+8]
+    
+    ; CR3 yazmacına Page Directory adresini yükle
+    mov cr3, eax
+    
+    ; CR0 yazmacındaki 31. biti (PG - Paging) 1 yaparak sayfalamayı başlat
+    mov eax, cr0
+    or eax, 0x80000000
+    mov cr0, eax
+    
+    pop ebp
+    ret

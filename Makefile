@@ -5,22 +5,30 @@ ASMFLAGS = -f elf32
 LD = gcc
 LDFLAGS = -m32 -T linker.ld -nostdlib
 
-OBJ = src/boot.o src/kernel.o
+# src klasöründeki tüm .c ve .asm dosyalarını otomatik bul
+C_SOURCES = $(wildcard src/*.c)
+ASM_SOURCES = $(wildcard src/*.asm)
+
+# .c ve .asm uzantılarını .o uzantısına çevir
+OBJ = $(ASM_SOURCES:.asm=.o) $(C_SOURCES:.c=.o)
+
 TARGET = myos.bin
 
 all: $(TARGET)
 
-src/boot.o: src/boot.asm
-	$(ASM) $(ASMFLAGS) src/boot.asm -o src/boot.o
+# Her bir Assembly dosyasını derleme kuralı
+%.o: %.asm
+	$(ASM) $(ASMFLAGS) $< -o $@
 
-src/kernel.o: src/kernel.c
-	$(CC) $(CFLAGS) src/kernel.c -o src/kernel.o
+# Her bir C dosyasını derleme kuralı
+%.o: %.c
+	$(CC) $(CFLAGS) $< -o $@
 
 $(TARGET): $(OBJ)
 	$(LD) $(LDFLAGS) -o $(TARGET) $(OBJ)
 
 run: $(TARGET)
-	qemu-system-i386 -kernel $(TARGET) -m 128
+	qemu-system-i386 -kernel $(TARGET)
 
 clean:
 	rm -f src/*.o $(TARGET)

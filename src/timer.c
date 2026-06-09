@@ -1,7 +1,7 @@
 #include "timer.h"
 #include "io.h"
 #include "vga.h"
-
+#include "task.h"
 // Sistemin açılışından bu yana geçen "tik" sayısı (Volatile olmalı ki derleyici optimize edip silmesin)
 volatile unsigned int timer_ticks = 0;
 unsigned int timer_freq = 100;
@@ -10,6 +10,9 @@ unsigned int timer_freq = 100;
 void timer_handler_main(void) {
     timer_ticks++;
     outb(0x20, 0x20); // İşlemciye kesmenin bittiğini bildir (EOI sinyali)
+
+    // PREEMPTIVE MULTITASKING: Her tik (10 ms) geldiğinde programı zorla değiştir!
+    schedule(); 
 }
 
 void init_timer(unsigned int freq) {

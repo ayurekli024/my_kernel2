@@ -3,19 +3,13 @@
 #include "vga.h"
 #include "memory.h"
 #include "timer.h"
-
+#include "string.h"
 // --- SHELL (KOMUT YORUMLAYICI) DEĞİŞKENLERİ VE FONKSİYONLARI ---
 char command_buffer[256]; // Kullanıcının yazdığı satırı tutacak bellek
 int buffer_index = 0;     // Bellekteki mevcut konumumuz
 
 // Standart C kütüphanesindeki strcmp fonksiyonunun kendi üretimimiz olan versiyonu
-int strcmp(const char *s1, const char *s2) {
-    while (*s1 && (*s1 == *s2)) {
-        s1++;
-        s2++;
-    }
-    return *(const unsigned char*)s1 - *(const unsigned char*)s2;
-}
+
 
 // Enter'a basıldığında buffer'daki yazıyı komut olarak değerlendiren fonksiyon
 void execute_command(void) {
@@ -23,44 +17,95 @@ void execute_command(void) {
     
     command_buffer[buffer_index] = '\0'; 
 
-    if (strcmp(command_buffer, "help") == 0) {
-        // Help menüsüne yeni komutumuzu da ekledik
-        print_string("Kullanilabilir komutlar: help, clear, merhaba, memorytest\n");
+    // --- ARGÜMAN AYRIŞTIRICI (PARSER) ---
+    char cmd[32];      // Komutun kendisi (örn: "echo")
+    char arg[224];     // Parametre kısmı (örn: "merhaba dunya")
+    int i = 0, j = 0;
+    
+    // 1. İlk boşluğa (' ') kadar olan kısmı cmd dizisine kopyala
+    while (command_buffer[i] != ' ' && command_buffer[i] != '\0' && i < 31) {
+        cmd[i] = command_buffer[i];
+        i++;
+    }
+    cmd[i] = '\0'; // Komutu sonlandır
+
+    // 2. Eğer boşluk varsa, geri kalan her şeyi arg dizisine kopyala
+    if (command_buffer[i] == ' ') {
+        i++; // Boşluğu atla
+        while (command_buffer[i] != '\0' && j < 223) {
+            arg[j] = command_buffer[i];
+            i++; j++;
+        }
+    }
+    arg[j] = '\0'; // Argümanı sonlandır
+
+    // --- YENİ KOMUT MANTIKLARI (cmd ve arg kullanarak) ---
+    
+    if (strcmp(cmd, "help") == 0) {
+        print_string("Komutlar: help, clear, memorytest, uptime, echo [metin], bekle [ms]\n");
     } 
-    else if (strcmp(command_buffer, "clear") == 0) {
+    else if (strcmp(cmd, "clear") == 0) {
         clear_screen();
     } 
-    else if (strcmp(command_buffer, "merhaba") == 0) {
-        print_string("Sisteme hos geldin! Ilk komutun basariyla calisti.\n");
-    } 
-    // --- YENİ KOMUTUMUZ: MEMORYTEST ---
-    else if (strcmp(command_buffer, "memorytest") == 0) {
+    // YENİ: Dışarıdan metin alan echo komutu
+    else if (strcmp(cmd, "echo") == 0) {
+        if (strlen(arg) > 0) {
+            print_string(arg);
+            print_string("\n");
+        } else {
+            print_string("Kullanim: echo [yazilacak_metin]\n");
+        }
+    }
+    // YENİ: Dışarıdan süre alan dinamik bekleme komutu
+    else if (strcmp(cmd, "bekle") == 0) {
+        int bekleme_suresi = atoi(arg); // Metni (örn: "2500") sayıya (2500) çevir
+        if (bekleme_suresi > 0) {
+            print_string("Bekleniyor: "); print_number(bekleme_suresi); print_string(" ms...\n");
+            sleep(bekleme_suresi);
+            print_string("Zaman doldu!\n");
+        } else {
+            print_string("Kullanim: bekle [milisaniye]\n");
+        }
+    }
+    else if (strcmp(cmd, "memorytest") == 0) {
+        print_string("--- Dinamik Bellek (Next-Fit) Testi ---\n");
+
         void* metin_alani = malloc(15); 
         void* sayi_alani = malloc(4);   
         
-        print_string("1. Malloc Adresi: "); print_number((unsigned int)metin_alani); print_string("\n");
-        print_string("2. Malloc Adresi: "); print_number((unsigned int)sayi_alani); print_string("\n");
+        print_string("1. Malloc (15 bayt) Adresi: "); print_number((unsigned int)metin_alani); print_string("\n");
+        print_string("2. Malloc (4 bayt) Adresi:  "); print_number((unsigned int)sayi_alani); print_string("\n");
         
         free(metin_alani);
-        print_string("1. Alan geri verildi (free yapildi).\n");
+        print_string("1. Alan serbest birakildi (free).\n");
         
+        // Next-Fit sayesinde bu yeni alan, en son kalınan yer olan 2. alanın ilerisine yazılmalı!
         void* yeni_alan = malloc(10); 
-        print_string("Yeni Malloc Adresi: "); print_number((unsigned int)yeni_alan); print_string("\n");
-    } 
-    else if (strcmp(command_buffer, "uptime") == 0) {
-        print_string("Sistem acilisindan bu yana: ");
+        print_string("Yeni Malloc (10 bayt) Adresi: "); print_number((unsigned int)yeni_alan); print_string("\n");
+
+        // Test sonrası bellek sızıntısı olmaması için temizlik
+        free(sayi_alani);
+        free(yeni_alan);
+        print_string("---------------------------------------\n");
+    }
+    else if (strcmp(cmd, "uptime") == 0) {
+        print_string("Sistem: ");
         print_number(get_uptime());
-        print_string(" saniye gecti.\n");
+        print_string(" saniyedir acik.\n");
     }
-    else if (strcmp(command_buffer, "bekle") == 0) {
-        print_string("Zamanlayici test ediliyor, 3 saniye bekle...\n");
-        sleep(3000); // Sistemi 3000 milisaniye dondur
-        print_string("Zaman doldu!\n");
+    // ... (önceki komutların altı)
+    else if (strcmp(cmd, "crashtest") == 0) {
+        print_string("Sistem bilerek cokertiliyor...\n");
+        // Derleyicinin bu hatayı önceden fark edip silmemesi (optimize etmemesi) için volatile kullanıyoruz
+        volatile int a = 10;
+        volatile int b = 0;
+        int c = a / b; // BAM! İşlemci burada donanımsal olarak patlayacak.
+        print_number(c); 
     }
-    // ----------------------------------
+    // ...
     else {
         print_string("Bilinmeyen komut: ");
-        print_string(command_buffer);
+        print_string(cmd);
         print_string("\n");
     }
 

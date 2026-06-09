@@ -25,6 +25,26 @@ void clear_screen(void) {
     update_hardware_cursor(cursor_x, cursor_y);
 }
 
+// Ekran dolduğunda tüm satırları bir yukarı kaydıran ve son satırı temizleyen fonksiyon
+void scroll_screen(void) {
+    char *video_memory = (char*) 0xB8000;
+    
+    // 1. Adım: 1. satırdan 24. satıra kadar olan tüm veriyi 0. satıra (bir üst satıra) taşı
+    // Her satır = 80 karakter * 2 bayt (ASCII + Renk) = 160 bayttır.
+    for (int i = 0; i < SCREEN_WIDTH * (SCREEN_HEIGHT - 1) * 2; i++) {
+        video_memory[i] = video_memory[i + (SCREEN_WIDTH * 2)];
+    }
+    
+    // 2. Adım: En alt satırı (24. satır) tamamen boşluk (' ') karakteriyle doldurarak temizle
+    int last_line_offset = SCREEN_WIDTH * (SCREEN_HEIGHT - 1) * 2;
+    for (int i = 0; i < SCREEN_WIDTH; i++) {
+        video_memory[last_line_offset + (i * 2)] = ' ';
+        video_memory[last_line_offset + (i * 2) + 1] = 0x07; // Standart gri renk
+    }
+    
+    // 3. Adım: İmleci temizlenen bu en alt satıra sabitle
+    cursor_y = SCREEN_HEIGHT - 1;
+}
 void put_char(char c) {
     char *video_memory = (char*) 0xB8000;
     if (c == '\b') {
@@ -42,7 +62,9 @@ void put_char(char c) {
         cursor_x++;
     }
     if (cursor_x >= SCREEN_WIDTH) { cursor_x = 0; cursor_y++; }
-    if (cursor_y >= SCREEN_HEIGHT) { cursor_y = 0; cursor_x = 0; }
+    if (cursor_y >= SCREEN_HEIGHT) { 
+        scroll_screen();
+    }
     update_hardware_cursor(cursor_x, cursor_y);
 }
 

@@ -1,7 +1,8 @@
 MBOOT_PAGE_ALIGN    equ 1 << 0
 MBOOT_MEM_INFO      equ 1 << 1
+MBOOT_VIDEO_MODE    equ 1 << 2   ; YENİ: Grafik Modu İstek Bayrağı
 MBOOT_HEADER_MAGIC  equ 0x1BADB002
-MBOOT_HEADER_FLAGS  equ MBOOT_PAGE_ALIGN | MBOOT_MEM_INFO
+MBOOT_HEADER_FLAGS  equ MBOOT_PAGE_ALIGN | MBOOT_MEM_INFO | MBOOT_VIDEO_MODE
 MBOOT_CHECKSUM      equ -(MBOOT_HEADER_MAGIC + MBOOT_HEADER_FLAGS)
 
 section .multiboot
@@ -9,7 +10,21 @@ align 4
     dd MBOOT_HEADER_MAGIC
     dd MBOOT_HEADER_FLAGS
     dd MBOOT_CHECKSUM
+    
+    ; Adres Alanları (ELF formatı kullandığımız için hepsini 0 bırakıyoruz)
+    dd 0 
+    dd 0
+    dd 0
+    dd 0
+    dd 0
+    
+    ; YENİ: VBE (Video BIOS Extension) Grafik Modu İstekleri
+    dd 0        ; 0 = Lineer Grafik Modu (Piksellere sırayla erişim)
+    dd 1024     ; Genişlik
+    dd 768      ; Yükseklik
+    dd 32       ; Renk Derinliği (32-bit True Color: ARGB)
 
+; --- BURADAN SONRASI AYNEN KALACAK (section .bss vb.) ---
 section .bss
 align 16
 stack_bottom:
@@ -73,3 +88,14 @@ timer_handler:
     call timer_handler_main
     popa
     iretd
+; --- İSTİSNA (EXCEPTION) YAKALAYICILARI ---
+global isr0
+extern fault_handler
+
+; 0 Numaralı İstisna: Sıfıra Bölme (Divide By Zero)
+isr0:
+    cli                 ; Başka kesmelerin (örneğin saatin) araya girmesini engelle
+    push 0              ; Hata kodu (0 numaralı hata için dummy kod)
+    push 0              ; Kesme numarası (0)
+    call fault_handler  ; C fonksiyonumuza atla
+    hlt                 ; Buradan dönüş yok, sistemi kilitle

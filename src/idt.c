@@ -22,14 +22,20 @@ void pic_remap(void) {
     outb(0x21, 0x20); outb(0xA1, 0x28);
     outb(0x21, 0x04); outb(0xA1, 0x02);
     outb(0x21, 0x01); outb(0xA1, 0x01);
-    outb(0x21, 0xFD); outb(0xA1, 0xFF); 
+    outb(0x21, 0xFC); outb(0xA1, 0xFF); 
 }
-
+extern void timer_handler(void);
 extern void keyboard_handler(void); 
 
 void init_idt(void) {
     idt_ptr.limit = (sizeof(struct IDT_entry) * 256) - 1;
     idt_ptr.base = (unsigned int)&idt;
+
+    // IRQ0 (Saat) -> 32. Kesme
+    idt_set_gate(32, (unsigned long)timer_handler, 0x08, 0x8E);
+
+    // IRQ1 (Klavye) -> 33. Kesme
     idt_set_gate(33, (unsigned long)keyboard_handler, 0x08, 0x8E);
+
     __asm__ __volatile__ ("lidt %0" : : "m" (idt_ptr));
 }

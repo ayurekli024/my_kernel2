@@ -64,3 +64,12 @@ enable_paging:
     
     pop ebp
     ret
+; --- SİSTEM SAATİ KESME SARMALAYICISI ---
+global timer_handler
+extern timer_handler_main
+
+timer_handler:
+    pusha
+    call timer_handler_main
+    popa
+    iretd

@@ -1,6 +1,8 @@
 #include "keyboard.h"
 #include "io.h"
 #include "vga.h"
+#include "memory.h"
+#include "timer.h"
 
 // --- SHELL (KOMUT YORUMLAYICI) DEĞİŞKENLERİ VE FONKSİYONLARI ---
 char command_buffer[256]; // Kullanıcının yazdığı satırı tutacak bellek
@@ -17,13 +19,13 @@ int strcmp(const char *s1, const char *s2) {
 
 // Enter'a basıldığında buffer'daki yazıyı komut olarak değerlendiren fonksiyon
 void execute_command(void) {
-    if (buffer_index == 0) return; // Boş basıldıysa hiçbir şey yapma
+    if (buffer_index == 0) return; 
     
-    command_buffer[buffer_index] = '\0'; // String dizisini kurallara uygun sonlandır
+    command_buffer[buffer_index] = '\0'; 
 
-    // Komutları kontrol et
     if (strcmp(command_buffer, "help") == 0) {
-        print_string("Kullanilabilir komutlar: help, clear, merhaba\n");
+        // Help menüsüne yeni komutumuzu da ekledik
+        print_string("Kullanilabilir komutlar: help, clear, merhaba, memorytest\n");
     } 
     else if (strcmp(command_buffer, "clear") == 0) {
         clear_screen();
@@ -31,13 +33,37 @@ void execute_command(void) {
     else if (strcmp(command_buffer, "merhaba") == 0) {
         print_string("Sisteme hos geldin! Ilk komutun basariyla calisti.\n");
     } 
+    // --- YENİ KOMUTUMUZ: MEMORYTEST ---
+    else if (strcmp(command_buffer, "memorytest") == 0) {
+        void* metin_alani = malloc(15); 
+        void* sayi_alani = malloc(4);   
+        
+        print_string("1. Malloc Adresi: "); print_number((unsigned int)metin_alani); print_string("\n");
+        print_string("2. Malloc Adresi: "); print_number((unsigned int)sayi_alani); print_string("\n");
+        
+        free(metin_alani);
+        print_string("1. Alan geri verildi (free yapildi).\n");
+        
+        void* yeni_alan = malloc(10); 
+        print_string("Yeni Malloc Adresi: "); print_number((unsigned int)yeni_alan); print_string("\n");
+    } 
+    else if (strcmp(command_buffer, "uptime") == 0) {
+        print_string("Sistem acilisindan bu yana: ");
+        print_number(get_uptime());
+        print_string(" saniye gecti.\n");
+    }
+    else if (strcmp(command_buffer, "bekle") == 0) {
+        print_string("Zamanlayici test ediliyor, 3 saniye bekle...\n");
+        sleep(3000); // Sistemi 3000 milisaniye dondur
+        print_string("Zaman doldu!\n");
+    }
+    // ----------------------------------
     else {
         print_string("Bilinmeyen komut: ");
         print_string(command_buffer);
         print_string("\n");
     }
 
-    // Komut işlendikten sonra buffer'ı sıfırla
     buffer_index = 0; 
 }
 

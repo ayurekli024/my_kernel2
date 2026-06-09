@@ -12,4 +12,17 @@ void* pmm_alloc_block();
 void pmm_free_block(void* physical_address);
 void init_paging();
 
-#endif
+// (önceki kodların altı)
+
+// --- DİNAMİK BELLEK (HEAP) YAPILARI ---
+struct block_header {
+    unsigned int size;         // Bloğun içindeki kullanılabilir veri boyutu
+    int is_free;               // 1 ise boş, 0 ise kullanımda
+    struct block_header* next; // Listedeki bir sonraki bloğun adresi
+};
+
+void init_heap();
+void* malloc(unsigned int size);
+void free(void* ptr);
+
+#endif // MEMORY_H bitişinin hemen üstünde olduğundan emin ol

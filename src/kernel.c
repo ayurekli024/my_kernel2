@@ -1,6 +1,7 @@
 #include "vga.h"
 #include "idt.h"
 #include "memory.h"
+#include "timer.h"
 
 void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     clear_screen();  
@@ -25,7 +26,8 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     }
     
     init_paging();
-    
+    init_heap();
+    init_timer(100);
     print_string("> "); 
 
     while(1) {

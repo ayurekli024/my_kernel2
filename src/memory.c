@@ -43,3 +43,82 @@ void init_paging() {
     enable_paging((unsigned int)page_directory);
     print_string("Sanal Bellek (Paging) mimarisi basariyla aktif edildi!\n");
 }
+// ============================================================================
+// DİNAMİK BELLEK YÖNETİCİSİ (HEAP / MALLOC / FREE)
+// ============================================================================
+
+#define HEAP_START 0x200000 // Heap başlangıç adresi (2 MB noktası)
+#define HEAP_SIZE  1048576  // Başlangıç için 1 MB'lık esnek alan
+
+struct block_header* heap_head;
+
+// Heap sistemini ilk kez ayağa kaldıran fonksiyon
+void init_heap() {
+    heap_head = (struct block_header*) HEAP_START;
+    // İlk başta tek bir devasa boş blok var
+    heap_head->size = HEAP_SIZE - sizeof(struct block_header);
+    heap_head->is_free = 1;
+    heap_head->next = 0; // 0 = NULL
+    
+    print_string("Dinamik Bellek (Heap) 2 MB adresinde baslatildi.\n");
+}
+
+// First-Fit algoritması ile çalışan malloc fonksiyonumuz
+void* malloc(unsigned int size) {
+    if (size == 0) return 0;
+
+    // Bellek hizalaması (Alignment) - İşlemci sağlığı için boyutu 4'ün katlarına yuvarla
+    size = (size + 3) & ~3; 
+
+    struct block_header* current = heap_head;
+
+    while (current != 0) {
+        // Eğer blok boşsa ve istediğimiz boyuta yetiyorsa
+        if (current->is_free && current->size >= size) {
+            
+            // Eğer bulduğumuz boşluk, istediğimizden ÇOK daha büyükse onu ikiye böl (Split)
+            // Bölmeye değmesi için en az bir header + 4 baytlık yer kalması lazım
+            if (current->size > size + sizeof(struct block_header) + 4) {
+                // Yeni boş bloğun adresini hesapla
+                struct block_header* new_block = (struct block_header*)((unsigned int)current + sizeof(struct block_header) + size);
+                
+                new_block->size = current->size - size - sizeof(struct block_header);
+                new_block->is_free = 1;
+                new_block->next = current->next;
+                
+                // Mevcut bloğu daralt ve yeni bloğa bağla
+                current->size = size;
+                current->next = new_block;
+            }
+            
+            // Bloğu "dolu" olarak işaretle ve verinin yazılacağı adresi kullanıcıya ver
+            current->is_free = 0;
+            return (void*)((unsigned int)current + sizeof(struct block_header));
+        }
+        current = current->next; // Bir sonraki bloğa geç (First-Fit döngüsü)
+    }
+    
+    print_string("HATA: Heap uzerinde yeterli bellek kalmadi!\n");
+    return 0; // NULL
+}
+
+// Tahsis edilen belleği sisteme geri iade eden fonksiyon
+void free(void* ptr) {
+    if (ptr == 0) return;
+
+    // Kullanıcının veri adresinden geriye giderek gizli kimlik kartını (header) bul
+    struct block_header* block = (struct block_header*)((unsigned int)ptr - sizeof(struct block_header));
+    block->is_free = 1; // Bloğu serbest bırak
+    
+    // Parçalanmayı (Fragmentation) önlemek için Blok Birleştirme (Coalescing)
+    // Tüm listeyi tara, yan yana duran iki "boş" blok varsa onları tek bir büyük blok yap
+    struct block_header* current = heap_head;
+    while (current != 0 && current->next != 0) {
+        if (current->is_free && current->next->is_free) {
+            current->size += current->next->size + sizeof(struct block_header);
+            current->next = current->next->next;
+        } else {
+            current = current->next; // Sadece birleşme yoksa ilerle
+        }
+    }
+}

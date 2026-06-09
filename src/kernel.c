@@ -1,66 +1,45 @@
+#include "multiboot.h"
 #include "vga.h"
 #include "idt.h"
 #include "memory.h"
 #include "timer.h"
 #include "task.h"
-#include "multiboot.h"
+#include "graphics.h"
 
 unsigned int* vesa_framebuffer;
-void task_A() {
-    // İLK ÇALIŞMA SİHRİ: Zamanlayıcının (PIT) bizi tekrar vurabilmesi için kapıları açıyoruz!
-    __asm__ __volatile__ ("sti"); 
 
-    while(1) {
-        print_string("A");
-        // yield(); SİLDİK! Artık insiyatif programda değil.
-    }
-}
-
-void task_B() {
-    __asm__ __volatile__ ("sti"); 
-
-    while(1) {
-        print_string("B");
-        // yield(); SİLDİK!
-    }
-}
 void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
-    // DİKKAT: clear_screen(); SİLİNDİ! (Artık metin modunda değiliz)
-    
     pic_remap();     
     init_idt();      
-    __asm__ __volatile__ ("sti"); 
 
-    if (magic != 0x2BADB002) {
-        return; // Hata durumunda yapacak bir şey yok, ekranımız yok
-    }
+    if (magic != 0x2BADB002) return; 
 
-    // GRUB'ın grafik modunu başarıyla açıp açmadığını kontrol et
-    if (mb_info->flags & (1 << 12)) { // 12. bit Framebuffer bilgisini belirtir
-        // 64-bitlik adresi 32-bitlik işaretçimize sığdırıyoruz
+    if (mb_info->flags & (1 << 12)) { 
         vesa_framebuffer = (unsigned int*)(unsigned int)mb_info->framebuffer_addr;
     }
 
-    if (mb_info->flags & 0x01) {
-        unsigned int total_memory_mb = (mb_info->mem_upper / 1024) + 1;
-        for (int i = 0; i < 256; i++) {
-            bitmap_set(i);
-        }
-    }
-    
-    init_paging();
-    init_heap();
-    init_timer(100); 
-    
-    // --- GRAFİK TESTİ: EKRANI MAVİYE BOYAYALIM ---
-    // Eğer vesa_framebuffer başarıyla alındıysa, tüm pikselleri tek tek boyuyoruz.
-    // 32-bit renk formatı: 0x00RRGGBB (Kırmızı, Yeşil, Mavi)
+    // --- ARDA OS MASAÜSTÜ ARAYÜZÜ (GUI) ---
     if (vesa_framebuffer != 0) {
-        for (int y = 0; y < 768; y++) {
-            for (int x = 0; x < 1024; x++) {
-                vesa_framebuffer[y * 1024 + x] = 0x000000FF; // Saf Mavi
-            }
-        }
+        // 1. Grafik motoruna ekranın boyutlarını bildir (1024x768)
+        init_graphics(vesa_framebuffer, 1024, 768);
+
+        // 2. Masaüstü Arka Planı (Koyu Turkuaz / Gece Mavisi)
+        // Renk Formatı (ARGB): 0x00RRGGBB
+        draw_rect(0, 0, 1024, 768, 0x001B26); 
+
+        // 3. Görev Çubuğu (Ekranın en alt kısmı, koyu gri)
+        draw_rect(0, 728, 1024, 40, 0x00111A); 
+
+        // 4. Ekrana İlk Pencereyi Çiz! (Beyaz zemin)
+        // X: 300, Y: 200 konumuna 400x300 ebatlarında bir pencere
+        draw_rect(300, 200, 400, 300, 0x00F0F0F0); 
+
+        // 5. Pencere Başlığı (Titlebar - Klasik Mavi)
+        draw_rect(300, 200, 400, 30, 0x000078D7); 
+        
+        // 6. Pencere Kapatma Butonu (Kırmızı)
+        // Başlığın sağ üst köşesine minik bir kare çiziyoruz
+        draw_rect(670, 205, 20, 20, 0x00E81123);
     }
 
     while(1) {

@@ -13,8 +13,9 @@ ASM_SOURCES = $(wildcard src/*.asm)
 OBJ = $(ASM_SOURCES:.asm=.o) $(C_SOURCES:.c=.o)
 
 TARGET = myos.bin
+ISO_TARGET = myos.iso
 
-all: $(TARGET)
+all: $(ISO_TARGET)
 
 # Her bir Assembly dosyasını derleme kuralı
 %.o: %.asm
@@ -24,11 +25,23 @@ all: $(TARGET)
 %.o: %.c
 	$(CC) $(CFLAGS) $< -o $@
 
+# 1. Aşama: myos.bin dosyasını oluştur
 $(TARGET): $(OBJ)
 	$(LD) $(LDFLAGS) -o $(TARGET) $(OBJ)
 
-run: $(TARGET)
-	qemu-system-i386 -kernel $(TARGET)
+# 2. Aşama: BIN dosyasını alıp önyüklenebilir bir ISO imajına çevir
+$(ISO_TARGET): $(TARGET) grub.cfg
+	mkdir -p isodir/boot/grub
+	cp $(TARGET) isodir/boot/$(TARGET)
+	cp grub.cfg isodir/boot/grub/grub.cfg
+	grub-mkrescue -o $(ISO_TARGET) isodir
+	rm -rf isodir
 
+# 3. Aşama: QEMU'yu CD-ROM modunda ISO ile başlat
+run: $(ISO_TARGET)
+	qemu-system-i386 -cdrom $(ISO_TARGET)
+
+# Temizlik (ISO ve isodir temizliği eklendi)
 clean:
-	rm -f src/*.o $(TARGET)
+	rm -f src/*.o $(TARGET) $(ISO_TARGET)
+	rm -rf isodir

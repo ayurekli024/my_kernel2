@@ -1,9 +1,10 @@
 CC = gcc
-CFLAGS = -m32 -c -std=gnu99 -ffreestanding -O2 -Wall -Wextra
+# YENİ: Stack boundary komutu silindi, sadece SSE kapatıldı.
+CFLAGS = -m32 -c -std=gnu99 -ffreestanding -O2 -Wall -Wextra -fno-pie -fno-pic -mno-sse -mno-sse2 -mno-mmx
 ASM = nasm
 ASMFLAGS = -f elf32
 LD = gcc
-LDFLAGS = -m32 -T linker.ld -nostdlib
+LDFLAGS = -m32 -T linker.ld -nostdlib -no-pie
 
 # src klasöründeki tüm .c ve .asm dosyalarını otomatik bul
 C_SOURCES = $(wildcard src/*.c)

@@ -6,7 +6,7 @@
 void bitmap_set(int bit);
 void* pmm_alloc_block();
 void pmm_free_block(void* physical_address);
-void init_paging();
+void init_paging(unsigned int framebuffer_addr);
 
 // (önceki kodların altı)
 

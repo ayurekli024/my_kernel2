@@ -32,16 +32,42 @@ void pmm_free_block(void* physical_address) {
     bitmap_clear((unsigned int)physical_address / BLOCK_SIZE);
 }
 
+// memory.c içindeki mevcut tanımlar
 unsigned int page_directory[1024] __attribute__((aligned(4096)));
 unsigned int first_page_table[1024] __attribute__((aligned(4096)));
+
+// YENİ: Çekirdek kodları ve fontlar büyüdüğü için 2. bir çekirdek sayfa tablosu ekliyoruz
+unsigned int second_page_table[1024] __attribute__((aligned(4096)));
+
+unsigned int vbe_page_tables[4][1024] __attribute__((aligned(4096)));
 extern void enable_paging(unsigned int page_dir_address);
 
-void init_paging() {
+void init_paging(unsigned int framebuffer_addr) {
+    // Tüm dizini temizle
     for(int i = 0; i < 1024; i++) page_directory[i] = 0x00000002;
+    
+    // 1. Tablo: İlk 4 MB'lık alan (0x00000000 - 0x003FFFFF)
     for(unsigned int i = 0; i < 1024; i++) first_page_table[i] = (i * 4096) | 3;
+    for(unsigned int i = 0; i < 1024; i++) second_page_table[i] = (0x400000 + (i * 4096)) | 3; // 4 MB ile 8 MB arası
+
     page_directory[0] = ((unsigned int)first_page_table) | 3;
+    page_directory[1] = ((unsigned int)second_page_table) | 3; // Çekirdeğe 8 MB yer açtık!
+    
+    // --- Geri kalan Ekran Kartı (VBE) haritalama kodun AYNEN KALACAK ---
+    if (framebuffer_addr != 0) {
+        unsigned int pd_index = framebuffer_addr >> 22;
+        if (pd_index > 1) { // Çekirdeği ezmemek için
+            for (int t = 0; t < 4; t++) { 
+                unsigned int block_start = (pd_index + t) << 22; 
+                for(int i = 0; i < 1024; i++) {
+                    vbe_page_tables[t][i] = (block_start + (i * 4096)) | 3; 
+                }
+                page_directory[pd_index + t] = ((unsigned int)vbe_page_tables[t]) | 3;
+            }
+        }
+    }
+    
     enable_paging((unsigned int)page_directory);
-    print_string("Sanal Bellek (Paging) mimarisi basariyla aktif edildi!\n");
 }
 // ============================================================================
 // DİNAMİK BELLEK YÖNETİCİSİ (HEAP / MALLOC / FREE)

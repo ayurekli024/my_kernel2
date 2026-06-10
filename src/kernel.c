@@ -7,6 +7,7 @@
 #include "mouse.h"
 #include "io.h"
 #include "gdt.h"
+#include "keyboard.h"
 
 unsigned int* vesa_framebuffer;
 extern void outb(unsigned short port, unsigned char data);
@@ -66,22 +67,46 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     int last_mouse_x = mouse_x;
     int last_mouse_y = mouse_y;
 
+    char user_input[256] = "ArdaOS Terminaline Yazin: "; 
+    int input_idx = 26; 
+
+    // SİSTEM İLK AÇILIŞ ÇİZİMİ
+    draw_desktop(); 
+    // YENİ: Sınırlandırılmış yazı motorunu kullanıyoruz (Maksimum 360 piksel genişlik)
+    draw_string_wrapped(320, 250, 360, user_input, 0x00000000, 0xFFFFFFFF);
+    draw_cursor(mouse_x, mouse_y); 
+    swap_buffers(); 
+
     while(1) {
-        // Eğer fare hareket ettiyse ekranı güncelle
+        int needs_redraw = 0; 
+
         if (mouse_x != last_mouse_x || mouse_y != last_mouse_y) {
-            // Şimdilik basit bir temizlik: Farenin eski yerini arka plan rengine boya
-            // (İleride bunun yerine double-buffering mimarisine geçeceğiz)
-            draw_rect(last_mouse_x, last_mouse_y, 5, 5, 0x001B26); 
-            
-            // Yeni koordinatları güncelle
             last_mouse_x = mouse_x;
             last_mouse_y = mouse_y;
+            needs_redraw = 1;
         }
 
-        // Farenin bulunduğu güncel noktaya kırmızı imleci çiz
-        draw_rect(mouse_x, mouse_y, 5, 5, 0x00FF0000); 
+        char kbd_char = get_keyboard_char();
+        if (kbd_char != 0) {
+            if (kbd_char == '\b' && input_idx > 0) { 
+                input_idx--;
+                user_input[input_idx] = '\0';
+            } else if (input_idx < 255 && kbd_char != '\b') { 
+                user_input[input_idx] = kbd_char;
+                input_idx++;
+                user_input[input_idx] = '\0'; 
+            }
+            needs_redraw = 1; 
+        }
 
-        // İşlemciyi bir sonraki donanım (fare/klavye) sinyaline kadar uyut
+        if (needs_redraw) {
+            draw_desktop();
+            // YENİ: Ekran güncellenirken de sınırlandırılmış fonksiyonu kullanıyoruz
+            draw_string_wrapped(320, 250, 360, user_input, 0x00000000, 0xFFFFFFFF); 
+            draw_cursor(mouse_x, mouse_y);
+            swap_buffers();
+        }
+
         __asm__ __volatile__ ("hlt"); 
     }
 }

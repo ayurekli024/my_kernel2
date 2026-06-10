@@ -53,12 +53,21 @@ _start:
     hlt
     jmp .hang
 
-; --- KLAVYE KESME SARMALAYICISI (INTERRUPT WRAPPER) ---
+; --- KLAVYE KESMESİ (IRQ1) ---
+global keyboard_handler
+extern keyboard_handler_main
+
 keyboard_handler:
-    pusha                    ; İşlemcinin o anki tüm genel kayıtçılarını (registers) yığına güvene al
-    call keyboard_handler_main ; C dilindeki asıl fonksiyonumuzu çağır
-    popa                     ; Kayıtçıları eski haline geri yükle
-    iretd                    ; Kesme işleminden geri dön (Interrupt Return - 32 bit)
+    cli
+    pusha
+    call keyboard_handler_main
+    
+    ; Master PIC'e (Port 0x20) işlemi bitirdiğimizi (EOI) söylüyoruz
+    mov al, 0x20
+    out 0x20, al 
+    
+    popa
+    iretd
     ; --- SAYFALAMA (PAGING) AKTİFLEŞTİRİCİ ---
 global enable_paging
 

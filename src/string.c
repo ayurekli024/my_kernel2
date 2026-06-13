@@ -10,15 +10,29 @@ unsigned int strlen(const char *s) {
     return len;
 }
 
-// "1000" gibi bir metni matematiksel 1000 sayısına dönüştürür (Argümanlar için şart)
-int atoi(const char *str) {
-    int res = 0;
-    // Sadece rakam olan karakterleri al
-    while (*str >= '0' && *str <= '9') {
-        res = res * 10 + (*str - '0');
-        str++;
+// İki metnin sadece ilk 'n' karakterini karşılaştırır
+int strncmp(const char* s1, const char* s2, int n) {
+    while (n > 0 && *s1 && (*s1 == *s2)) {
+        s1++; s2++; n--;
     }
-    return res;
+    if (n == 0) return 0;
+    return *(const unsigned char*)s1 - *(const unsigned char*)s2;
+}
+
+// Metin (String) formatındaki sayıları gerçek Integer'a (Tamsayı) çevirir
+int atoi(const char* str) {
+    int res = 0;
+    int sign = 1;
+    int i = 0;
+    
+    // Negatif sayı kontrolü
+    if (str[0] == '-') { sign = -1; i++; }
+    
+    // Rakamları basamak basamak sayıya dönüştür
+    for (; str[i] != '\0' && str[i] >= '0' && str[i] <= '9'; ++i) {
+        res = res * 10 + (str[i] - '0');
+    }
+    return sign * res;
 }
 void strcpy(char* dest, const char* src) {
     while (*src) {

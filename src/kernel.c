@@ -76,7 +76,16 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     // Kullanıcının yazı yazdığı alan (Prompt)
     char user_input[256] = "Arda> "; 
     int input_idx = 6; // İmleç "Arda> " yazısından sonra başlıyor
+    // CMOS yongasından (Gerçek Zamanlı Saat) veri okuyan fonksiyon
+    unsigned char get_rtc_register(int reg) {
+        outb(0x70, reg);
+        return inb(0x71);
+    }
 
+    // CMOS verileri BCD (Binary Coded Decimal) formatındadır, onu normal sayılara çeviririz
+    unsigned char bcd_to_bin(unsigned char bcd) {
+        return (bcd & 0x0F) + ((bcd >> 4) * 10);
+    }
     draw_desktop(win_x, win_y, win_w, win_h, current_bg_color); 
     draw_string_wrapped(win_x + 10, win_y + 40, win_w - 20, terminal_response, 0x00000000, 0xFFFFFFFF);
     draw_string_wrapped(win_x + 10, win_y + 250, win_w - 20, user_input, 0x000000AA, 0xFFFFFFFF);
@@ -151,6 +160,74 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
                     strcat(terminal_response, sec_str);
                     strcat(terminal_response, " saniye");
                 }
+                else if (strcmp(cmd, "saat") == 0) {
+                    unsigned char h = bcd_to_bin(get_rtc_register(0x04));
+                    unsigned char m = bcd_to_bin(get_rtc_register(0x02));
+                    unsigned char s = bcd_to_bin(get_rtc_register(0x00));
+                    
+                    // UTC saatini Türkiye Saatine (UTC+3) uyarlıyoruz (Basitçe +3 ekliyoruz, 24'ü geçerse mod alıyoruz)
+                    h = (h + 3) % 24;
+                    
+                    char hs[10], ms[10], ss[10];
+                    itoa(h, hs); itoa(m, ms); itoa(s, ss);
+                    
+                    strcpy(terminal_response, "Gercek Donanim Saati (CMOS UTC+3): ");
+                    strcat(terminal_response, hs); strcat(terminal_response, ":");
+                    strcat(terminal_response, ms); strcat(terminal_response, ":");
+                    strcat(terminal_response, ss);
+                }
+                
+                // 2. YENİ KOMUT: Yankı (Parametre Okuma)
+                // Eğer komut "yanki " ile başlıyorsa (ilk 6 karakter)
+                else if (strncmp(cmd, "yanki ", 6) == 0) { 
+                    strcpy(terminal_response, "Sen dedin ki: ");
+                    strcat(terminal_response, cmd + 6); // 6. karakterden sonrasını al
+                }
+                
+                // 3. YENİ KOMUT: Hesap Makinesi
+                // Eğer komut "hesapla " ile başlıyorsa (ilk 8 karakter)
+                else if (strncmp(cmd, "hesapla ", 8) == 0) {
+                    int i = 8; // Komutun verisi 8. indisten başlıyor
+                    
+                    // İlk sayıyı al (Boşlukları atla)
+                    // İlk sayıyı al (Boşlukları atla)
+                    while(cmd[i] == ' ') i++;
+                    int num1 = atoi(&cmd[i]);
+                    
+                    // DÜZELTME: Öncelik hatasını engellemek için parantezler eklendi
+                    while((cmd[i] >= '0' && cmd[i] <= '9') || cmd[i] == '-') i++;
+                    
+                    while(cmd[i] == ' ') i++; // Boşlukları atla
+                    char op = cmd[i];
+                    i++;
+                    
+                    // İkinci sayıyı al
+                    while(cmd[i] == ' ') i++;
+                    int num2 = atoi(&cmd[i]);
+
+                    int result = 0;
+                    int valid = 1;
+                    
+                    // Mantıksal İşlemler
+                    if (op == '+') result = num1 + num2;
+                    else if (op == '-') result = num1 - num2;
+                    else if (op == '*') result = num1 * num2;
+                    else if (op == '/') {
+                        if (num2 == 0) { valid = 0; strcpy(terminal_response, "Hata: Sifira bolme yapilamaz!"); }
+                        else result = num1 / num2;
+                    } else {
+                        valid = 0;
+                        strcpy(terminal_response, "Gecersiz islem! Ornek kullanim: hesapla 25 + 14");
+                    }
+
+                    if (valid) {
+                        char res_str[32];
+                        itoa(result, res_str);
+                        strcpy(terminal_response, "Islem Sonucu: ");
+                        strcat(terminal_response, res_str);
+                    }
+                }
+                
                 else if (strcmp(cmd, "") == 0) { } 
                 else {
                     strcpy(terminal_response, "Hata: Bilinmeyen komut! 'help' yazarak komutlari gorebilirsiniz.");

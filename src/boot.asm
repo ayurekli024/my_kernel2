@@ -88,13 +88,18 @@ enable_paging:
     
     pop ebp
     ret
-; --- SİSTEM SAATİ KESME SARMALAYICISI ---
+; --- DONANIM SAATİ (PIT - IRQ0) KESMESİ ---
 global timer_handler
 extern timer_handler_main
 
 timer_handler:
     pusha
     call timer_handler_main
+    
+    ; Anakarttaki PIC'e "Saati okudum" onayı (EOI) gönder
+    mov al, 0x20
+    out 0x20, al
+    
     popa
     iretd
 ; --- İSTİSNA (EXCEPTION) YAKALAYICILARI ---

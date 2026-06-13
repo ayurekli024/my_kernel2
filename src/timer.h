@@ -1,8 +1,8 @@
 #ifndef TIMER_H
 #define TIMER_H
 
-void init_timer(unsigned int freq);
-void sleep(unsigned int ms);
-unsigned int get_uptime();
+extern volatile unsigned int timer_ticks;
+void init_timer(unsigned int frequency);
+void timer_handler_main(void);
 
 #endif

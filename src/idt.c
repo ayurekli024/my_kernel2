@@ -46,6 +46,7 @@ extern void isr13(void);
 extern void isr14(void);
 extern void keyboard_handler(void);
 extern void mouse_handler(void);
+extern void timer_handler(void);
 
 // Mavi Ekran (BSOD) Motoru
 void fault_handler(int int_no, int err_code) {
@@ -102,7 +103,7 @@ void init_idt(void) {
     idt_set_gate(8, (unsigned long)isr8, 0x08, 0x8E);   // YENİ: Sessiz kilitlenmeyi çözen kapı!
     idt_set_gate(13, (unsigned long)isr13, 0x08, 0x8E);
     idt_set_gate(14, (unsigned long)isr14, 0x08, 0x8E);
-    
+    idt_set_gate(32, (unsigned long)timer_handler, 0x08, 0x8E);
     // Kendi yazdığımız donanım sürücüleri
     idt_set_gate(33, (unsigned long)keyboard_handler, 0x08, 0x8E);
     idt_set_gate(44, (unsigned long)mouse_handler, 0x08, 0x8E);

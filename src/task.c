@@ -1,63 +1,47 @@
 #include "task.h"
-#include "memory.h"
-#include "vga.h"
+#include "memory.h" // malloc için
 
-// Görev Kontrol Bloğu (TCB - Thread Control Block)
-typedef struct {
-    unsigned int esp;  // Görevin uykuya daldığı yığın (stack) adresi
-    int active;
-} thread_t;
+task_t* current_task;
+task_t* ready_queue;
+int next_pid = 1;
 
-#define MAX_TASKS 4
-thread_t tasks[MAX_TASKS];
-int current_task = -1;
-int task_count = 0;
+extern void task_switch(unsigned int *prev_esp, unsigned int next_esp);
 
-// Assembly dosyamızdaki fonksiyonu C'ye tanıtıyoruz
-extern void switch_task(unsigned int *old_esp, unsigned int new_esp);
-
-void init_multitasking() {
-    // İşletim sisteminin o an çalıştığı ana kodu "Görev 0" olarak kaydet
-    tasks[0].active = 1;
-    current_task = 0;
-    task_count = 1;
-    print_string("Multitasking (Coklu Gorev) baslatildi.\n");
+void init_tasking() {
+    // 1. O an çalışan Kernel_main döngümüzü "Task 0" olarak tescilliyoruz
+    current_task = (task_t*)malloc(sizeof(task_t));
+    current_task->id = 0;
+    current_task->next = current_task; // Kuyrukta şimdilik sadece kendisi var
+    ready_queue = current_task;
 }
 
-void create_task(void (*task_func)()) {
-    if (task_count >= MAX_TASKS) return;
-
-    // Her görev için dinamik bellekten (Heap) 4 KB'lık yığın (Stack) tahsis et
-    unsigned int *stack = (unsigned int *)malloc(4096);
-    unsigned int stack_top = (unsigned int)stack + 4096;
-
-    // Yığını, sanki bir fonksiyon çağrılmış ve kesilmiş gibi "Sahte (Fake)" değerlerle doldur
-    // 1. İşlemcinin geri döneceği adres (Fonksiyonun başlangıç noktası)
-    stack_top -= 4;
-    *((unsigned int *)stack_top) = (unsigned int)task_func;
-
-    // 2. switch_task içindeki 4 adet 'pop' işlemi için sahte yazmaç değerleri (0)
-    stack_top -= 4; *((unsigned int *)stack_top) = 0; // EBP
-    stack_top -= 4; *((unsigned int *)stack_top) = 0; // EBX
-    stack_top -= 4; *((unsigned int *)stack_top) = 0; // ESI
-    stack_top -= 4; *((unsigned int *)stack_top) = 0; // EDI
-
-    // Yığının son durumunu göreve kaydet ve aktif et
-    tasks[task_count].esp = stack_top;
-    tasks[task_count].active = 1;
-    task_count++;
-}
-
-// "Benim işim bitti, sıradaki görev çalışsın" komutu (Round-Robin Scheduling)
-void schedule() {
-    if (task_count <= 1) return;
-
-    int old_task = current_task;
+void create_task(void (*func)(void)) {
+    task_t* new_task = (task_t*)malloc(sizeof(task_t));
+    new_task->id = next_pid++;
     
-    // Bir sonraki göreve geç (Sona gelirse başa dön)
-    current_task++;
-    if (current_task >= task_count) current_task = 0;
+    // Her yeni görev için 4 KB'lık özel bir yığın (Stack) tahsis et
+    unsigned int* stack = (unsigned int*)malloc(4096);
+    unsigned int* stack_top = (unsigned int*)((unsigned int)stack + 4096); // Yığınlar yukarıdan aşağı büyür
+    
+    // İşlemciyi kandırmak için yığına sahte kayıtlar (Fake Registers) diziyoruz
+    *(--stack_top) = (unsigned int)func; // RET komutunun atlayacağı adres (Fonksiyonun kendisi)
+    *(--stack_top) = 0; // EBP
+    *(--stack_top) = 0; // EBX
+    *(--stack_top) = 0; // ESI
+    *(--stack_top) = 0; // EDI
+    
+    new_task->esp = (unsigned int)stack_top;
+    
+    // Yeni görevi listeye ekle (Round Robin Dairesi)
+    new_task->next = ready_queue->next;
+    ready_queue->next = new_task;
+}
 
-    // Yığını (Stack) fiziksel olarak takas et!
-    switch_task(&tasks[old_task].esp, tasks[current_task].esp);
+// O anki görevi durdurup işlemciyi sıradaki göreve devreden sihirli fonksiyon
+void yield() {
+    task_t* prev = current_task;
+    current_task = current_task->next;
+    if (prev != current_task) {
+        task_switch(&prev->esp, current_task->esp);
+    }
 }

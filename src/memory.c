@@ -74,7 +74,8 @@ void init_paging(unsigned int framebuffer_addr) {
 // ============================================================================
 
 #define HEAP_START 0x200000 // Heap başlangıç adresi (2 MB noktası)
-#define HEAP_SIZE  1048576  // Başlangıç için 1 MB'lık esnek alan
+// YENİ: 1 MB'lık alanı 5 MB'a (5242880 bayt) çıkardık! (3 MB ekran + 2 MB ekstra)
+#define HEAP_SIZE  5242880  
 
 struct block_header* heap_head;
 struct block_header* next_fit_ptr;

@@ -7,6 +7,7 @@ extern void outb(unsigned short port, unsigned char data);
 
 int mouse_x = 512; // Fare başlama koordinatı (Ekranın ortası)
 int mouse_y = 384;
+int mouse_left_button = 0;
 
 unsigned char mouse_cycle = 0;
 unsigned char mouse_byte[3];
@@ -43,24 +44,22 @@ void mouse_handler_main() {
     // 3 baytlık fare paketini topla
     mouse_byte[mouse_cycle++] = inb(0x60);
     
-    if (mouse_cycle == 3) { // Paket tamamlandı!
+    if (mouse_cycle == 3) {
         mouse_cycle = 0;
+        if ((mouse_byte[0] & 0x80) || (mouse_byte[0] & 0x40)) return;
         
-        // Taşma (Overflow) bayraklarını kontrol et
-        if ((mouse_byte[0] & 0x80) || (mouse_byte[0] & 0x40)) return; 
+        // YENİ: Paketin ilk baytından sol buton durumunu filtrele (Bit 0)
+        mouse_left_button = (mouse_byte[0] & 0x01);
         
-        // X ve Y eksenindeki değişimi hesapla
         int d_x = mouse_byte[1];
         int d_y = mouse_byte[2];
         
-        // İşaret (Sign) bitlerine göre negatif değerleri düzelt
-        if (d_x && (mouse_byte[0] & (1<<4))) d_x -= 0x100;
-        if (d_y && (mouse_byte[0] & (1<<5))) d_y -= 0x100;
-
+        if (d_x && (mouse_byte[0] & 0x10)) d_x |= 0xFFFFFF00;
+        if (d_y && (mouse_byte[0] & 0x20)) d_y |= 0xFFFFFF00;
+        
         mouse_x += d_x;
-        mouse_y -= d_y; // Ekran koordinatlarında Y ekseni aşağı doğru artar
-
-        // Farenin ekran sınırları dışına çıkmasını engelle
+        mouse_y -= d_y; // VBE modunda Y ekseni aşağı doğru artar
+        
         if (mouse_x < 0) mouse_x = 0;
         if (mouse_y < 0) mouse_y = 0;
         if (mouse_x > 1023) mouse_x = 1023;

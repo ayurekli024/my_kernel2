@@ -73,6 +73,10 @@ void fault_handler(int int_no, int err_code) {
 
     draw_string(50, 150, "Lutfen sisteminizi fiziksel olarak yeniden baslatin.", 0x00FFFFFF, 0x000000AA);
 
+    // YENİ: Mavi ekranı RAM'den çıkarıp gerçek monitöre itiyoruz!
+    extern void swap_buffers(void);
+    swap_buffers();
+
     while(1) {
         __asm__ __volatile__ ("cli; hlt");
     }
@@ -93,8 +97,9 @@ void init_idt(void) {
     }
     
     // Kendi yazdığımız özel hata yakalayıcıları üzerine zımbalıyoruz
+    // 2. ADIM: Kendi kapılarımızı (üzerine yazarak) sisteme tanıtıyoruz
     idt_set_gate(0, (unsigned long)isr0, 0x08, 0x8E);
-    idt_set_gate(8, (unsigned long)isr8, 0x08, 0x8E);   // ÇİFTE HATA (En önemlisi buydu!)
+    idt_set_gate(8, (unsigned long)isr8, 0x08, 0x8E);   // YENİ: Sessiz kilitlenmeyi çözen kapı!
     idt_set_gate(13, (unsigned long)isr13, 0x08, 0x8E);
     idt_set_gate(14, (unsigned long)isr14, 0x08, 0x8E);
     

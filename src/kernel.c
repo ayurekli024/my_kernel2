@@ -12,80 +12,112 @@
 unsigned int* vesa_framebuffer;
 extern void outb(unsigned short port, unsigned char data);
 extern unsigned char inb(unsigned short port);
-// Masaüstü bileşenlerini çizen yardımcı fonksiyon
-void draw_desktop(void) {
-    // 1. Masaüstü Arka Planı (Koyu Turkuaz / Gece Mavisi) - 0x00RRGGBB
+
+// Masaüstü bileşenlerini DİNAMİK koordinatlarla çizen yardımcı fonksiyon
+void draw_desktop(int win_x, int win_y, int win_w, int win_h) {
+    // 1. Masaüstü Arka Planı (Koyu Turkuaz)
     draw_rect(0, 0, 1024, 768, 0x001B26); 
 
-    // 2. Görev Çubuğu (Ekranın en alt kısmı, koyu gri)
+    // 2. Görev Çubuğu (Koyu gri)
     draw_rect(0, 728, 1024, 40, 0x00111A); 
 
-    // 3. İlk Pencere (Beyaz zemin)
-    draw_rect(300, 200, 400, 300, 0x00F0F0F0); 
+    // 3. Dinamik Pencere Gövdesi (Beyaz zemin)
+    draw_rect(win_x, win_y, win_w, win_h, 0x00F0F0F0); 
 
-    // 4. Pencere Başlığı (Titlebar - Klasik Mavi)
-    draw_rect(300, 200, 400, 30, 0x000078D7); 
+    // 4. Dinamik Pencere Başlığı (Titlebar - Klasik Mavi)
+    // Yüksekliği 30 piksel, sürükleme alanımız burası olacak!
+    draw_rect(win_x, win_y, win_w, 30, 0x000078D7); 
     
     // 5. Pencere Kapatma Butonu (Kırmızı)
-    draw_rect(670, 205, 20, 20, 0x00E81123);
-
-    // --- YAZI MOTORU METİNLERİ ---
-    // Pencere başlığı yazıları (Şeffaf arka plan için 0xFFFFFFFF)
-    draw_string(310, 211, "ArdaOS V0.1", 0x00FFFFFF, 0xFFFFFFFF);
-    draw_string(676, 211, "X", 0x00FFFFFF, 0xFFFFFFFF); 
-
-    // Pencerenin içindeki çok satırlı (\n) metin
-    draw_string(320, 250, "Masaustu sistemine hos geldiniz!\nAlt satira gecis basariyla saglandi.\n\nSistem Durumu: Korumali Mod Aktif.", 0x00000000, 0xFFFFFFFF);
+    draw_rect(win_x + win_w - 30, win_y, 30, 30, 0x00FF2D55);
+    
+    // Pencere Başlık Yazısı
+    draw_string(win_x + 10, win_y + 8, "ArdaOS Terminali", 0x00FFFFFF, 0x000078D7);
 }
 
+// DÜZELTME: multiboot_info_t yerine projenin orijinal yapısı olan struct multiboot_info* kullanıldı
 void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
-    // 1. Her ihtimale karşı donanım kesmelerini geçici olarak kapatıyoruz
-    __asm__ __volatile__ ("cli"); 
+    // Temel donanım ve segmentasyon kurulumları
     init_gdt();
     pic_remap();     
     init_idt();      
     init_mouse(); // PS/2 Fare denetleyicisini kur
 
+    // Artık bu kontrol doğru çalışacak ve sistemi kapatmayacak!
     if (magic != 0x2BADB002) return; 
 
     if (mb_info->flags & (1 << 12)) { 
         vesa_framebuffer = (unsigned int*)(unsigned int)mb_info->framebuffer_addr;
     }
     
-    // 16 MB'lık dev zırhlı sayfalama (Paging) haritasını ve Heap'i aktif et
+    // DÜZELTME: Satır sonundaki hatalı \n temizlendi
     init_paging((unsigned int)vesa_framebuffer); 
     init_heap();
     
     // Temel çizim motoru başlatılıyor
     if (vesa_framebuffer != 0) {
         init_graphics(vesa_framebuffer, 1024, 768);
-        draw_desktop(); // Masaüstünü ilk kez çiz
     }
 
+    // Donanım kesmelerini (Interrupts) serbest bırak
     __asm__ __volatile__ ("sti");
-    // Eski fare koordinatını takip etmek için değişkenler
+
+    // PENCERE KOORDİNAT DEĞİŞKENLERİ
+    int win_x = 300;
+    int win_w = 400;
+    int win_y = 200;
+    int win_h = 300;
+    int is_dragging = 0; // Sürükleme aktif mi?
+
     int last_mouse_x = mouse_x;
     int last_mouse_y = mouse_y;
 
     char user_input[256] = "ArdaOS Terminaline Yazin: "; 
     int input_idx = 26; 
 
-    // SİSTEM İLK AÇILIŞ ÇİZİMİ
-    draw_desktop(); 
-    // YENİ: Sınırlandırılmış yazı motorunu kullanıyoruz (Maksimum 360 piksel genişlik)
-    draw_string_wrapped(320, 250, 360, user_input, 0x00000000, 0xFFFFFFFF);
+    // İLK AÇILIŞ ÇİZİMİ
+    draw_desktop(win_x, win_y, win_w, win_h); 
+    draw_string_wrapped(win_x + 20, win_y + 50, win_w - 40, user_input, 0x00000000, 0xFFFFFFFF);
     draw_cursor(mouse_x, mouse_y); 
     swap_buffers(); 
 
+    // ANA PENCERE YÖNETİCİSİ DÖNGÜSÜ
     while(1) {
-        int needs_redraw = 0; 
+        int needs_redraw = 0;
 
-        if (mouse_x != last_mouse_x || mouse_y != last_mouse_y) {
+        // Farenin anlık hareket miktarını (Delta) hesapla
+        int delta_x = mouse_x - last_mouse_x;
+        int delta_y = mouse_y - last_mouse_y;
+
+        // 1. DURUM: Fare hareket etti mi?
+        if (delta_x != 0 || delta_y != 0) {
+            needs_redraw = 1;
+
+            // Eğer sol buton BASILIYSA sürükleme kontrolü yap
+            if (mouse_left_button) {
+                // Eğer halihazırda sürükleme başlamadıysa, farenin başlık çubuğunda olup olmadığını kontrol et
+                if (!is_dragging) {
+                    if (mouse_x >= win_x && mouse_x < (win_x + win_w) &&
+                        mouse_y >= win_y && mouse_y < (win_y + 30)) {
+                        is_dragging = 1; // Sürüklemeyi başlat.
+                    }
+                }
+                
+                // Sürükleme aktifse pencere konumunu farenin hareketi kadar kaydır
+                if (is_dragging) {
+                    win_x += delta_x;
+                    win_y += delta_y;
+                }
+            } else {
+                // Sol buton bırakıldığı an sürüklemeyi bitir
+                is_dragging = 0;
+            }
+
             last_mouse_x = mouse_x;
             last_mouse_y = mouse_y;
-            needs_redraw = 1;
         }
 
+        // 2. DURUM: Klavyeden tuşa basıldı mı?
         char kbd_char = get_keyboard_char();
         if (kbd_char != 0) {
             if (kbd_char == '\b' && input_idx > 0) { 
@@ -99,10 +131,15 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
             needs_redraw = 1; 
         }
 
+        // ÇİZİM VE EKRAN GÜNCELLEME (BUFFER FLIP)
         if (needs_redraw) {
-            draw_desktop();
-            // YENİ: Ekran güncellenirken de sınırlandırılmış fonksiyonu kullanıyoruz
-            draw_string_wrapped(320, 250, 360, user_input, 0x00000000, 0xFFFFFFFF); 
+            // Masaüstünü yeni koordinatlarla RAM'de çiz
+            draw_desktop(win_x, win_y, win_w, win_h);
+            
+            // Terminal yazısını pencerenin içine göre hizalayarak çiz
+            draw_string_wrapped(win_x + 20, win_y + 50, win_w - 40, user_input, 0x00000000, 0xFFFFFFFF); 
+            
+            // İmleci bas ve hayali ekranı monitöre fırlat!
             draw_cursor(mouse_x, mouse_y);
             swap_buffers();
         }

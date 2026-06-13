@@ -62,9 +62,9 @@ keyboard_handler:
     pusha
     call keyboard_handler_main
     
-    ; Master PIC'e (Port 0x20) işlemi bitirdiğimizi (EOI) söylüyoruz
+    ; YENİ: Anakarttaki PIC'e "İşlem Bitti" (EOI) onayını kesinlikle göndermeliyiz!
     mov al, 0x20
-    out 0x20, al 
+    out 0x20, al
     
     popa
     iretd

@@ -1,12 +1,9 @@
 #include "string.h"
 
-// İki metni karşılaştırır (Eşitse 0 döndürür)
-
-
-// Metnin karakter uzunluğunu bulur
-unsigned int strlen(const char *s) {
-    unsigned int len = 0;
-    while (s[len]) len++;
+// Bir metnin (String) kaç karakterden oluştuğunu sayar
+int strlen(const char* str) {
+    int len = 0;
+    while (str[len]) len++;
     return len;
 }
 
@@ -34,6 +31,8 @@ int atoi(const char* str) {
     }
     return sign * res;
 }
+
+// Bir metni başka bir metne kopyalar
 void strcpy(char* dest, const char* src) {
     while (*src) {
         *dest++ = *src++;
@@ -49,6 +48,7 @@ int strcmp(const char* s1, const char* s2) {
     }
     return *(const unsigned char*)s1 - *(const unsigned char*)s2;
 }
+
 // İki metni birbirine ucuca ekler
 void strcat(char* dest, const char* src) {
     while (*dest) dest++;

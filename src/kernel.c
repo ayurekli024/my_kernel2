@@ -23,6 +23,13 @@ int shape_y[MAX_SHAPES];
 int shape_w[MAX_SHAPES];
 int shape_h[MAX_SHAPES];
 unsigned int shape_color[MAX_SHAPES];
+// ==========================================
+    // KOMUT GEÇMİŞİ (COMMAND HISTORY)
+    // ==========================================
+    #define MAX_HISTORY 10
+    char cmd_history[MAX_HISTORY][256];
+    int history_count = 0; // Toplam kaç komut yazıldı
+    int history_index = 0; // Ok tuşlarıyla gezinirken nerede olduğumuz
 // Masaüstü bileşenlerini DİNAMİK koordinatlarla çizen yardımcı fonksiyon
 // YENİ: Masaüstü arka plan rengi artık dışarıdan parametre alıyor!
 void draw_desktop(int win_x, int win_y, int win_w, int win_h, unsigned int desktop_bg) {
@@ -143,7 +150,11 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
 
             if (kbd_char == '\n') { 
                 char* cmd = &user_input[6]; 
-
+                if (strcmp(cmd, "") != 0) {
+                    strcpy(cmd_history[history_count % MAX_HISTORY], cmd);
+                    history_count++;
+                    history_index = history_count; // İmleci en sona (yeni boşluğa) al
+                }
                 if (strcmp(cmd, "info") == 0) {
                     strcpy(terminal_response, "Sistem: ArdaOS V0.1\nMimari: 32-bit x86\nCekirdek Durumu: Kararli\nGUI: Double-Buffered");
                 } 
@@ -306,6 +317,30 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
                 strcpy(user_input, "Arda> ");
                 input_idx = 6;
             } 
+            else if (kbd_char == 17) { 
+                if (history_count > 0 && history_index > 0) {
+                    history_index--; // Bir önceki komuta git
+                    strcpy(user_input, "Arda> ");
+                    strcat(user_input, cmd_history[history_index % MAX_HISTORY]);
+                    input_idx = 6 + strlen(cmd_history[history_index % MAX_HISTORY]);
+                }
+            }
+            // YENİ: AŞAĞI OK TUŞU (Günümüze Dön)
+            else if (kbd_char == 18) { 
+                if (history_index < history_count) {
+                    history_index++; // Bir sonraki komuta git
+                    if (history_index == history_count) {
+                        // En sona (günümüze) geldiysek satırı temizle
+                        strcpy(user_input, "Arda> ");
+                        input_idx = 6;
+                    } else {
+                        // Aradaki bir komuttaysak onu yazdır
+                        strcpy(user_input, "Arda> ");
+                        strcat(user_input, cmd_history[history_index % MAX_HISTORY]);
+                        input_idx = 6 + strlen(cmd_history[history_index % MAX_HISTORY]);
+                    }
+                }
+            }
             else if (kbd_char == '\b' && input_idx > 6) { 
                 input_idx--;
                 user_input[input_idx] = '\0';

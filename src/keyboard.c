@@ -38,9 +38,13 @@ void keyboard_handler_main() {
         unsigned char scancode = inb(0x60);
         
         // 1. KONTROL: Shift tuşları bırakıldı mı? (Break Codes: 0xAA veya 0xB6)
-        if (scancode == 0xAA || scancode == 0xB6) {
-            shift_pressed = 0; // Shift'ten elini çekti, durumu sıfırla
-            return;
+        if (scancode == 0x48 || scancode == 0x50) {
+            // Aşağıda işleyeceğimiz için burayı boş geçiyoruz, Break kontrolüne takılmasın
+        } else {
+            if (scancode == 0xAA || scancode == 0xB6) {
+                shift_pressed = 0; // Shift'ten elini çekti, durumu sıfırla
+                return;
+            }
         }
 
         // 2. KONTROL: Shift tuşlarına basıldı mı? (Make Codes: 0x2A veya 0x36)
@@ -50,19 +54,28 @@ void keyboard_handler_main() {
         }
         
         // 3. KONTROL: Diğer tuşların bırakılma (Break) olaylarını yoksay
-        if (scancode & 0x80) {
+        // Ok tuşlarının make code'ları 0x80'den küçük olduğu için buraya takılmazlar
+        if (!(scancode == 0x48 || scancode == 0x50) && (scancode & 0x80)) {
             return; 
         }
 
         // 4. KARAR: Hangi haritayı kullanacağız?
-        char c;
-        if (shift_pressed) {
-            c = kbd_us_shifted[scancode]; // Shift basılıysa büyük harf haritasını kullan
-        } else {
-            c = kbd_us[scancode];         // Değilse normal haritayı kullan
-        }
+        char c = 0;
         
-        // Karakteri kuyruğa (Buffer) ekle
+        // DÜZELTME: Ok tuşlarını doğrudan karakter değişkenine (c) atıyoruz!
+        if (scancode == 0x48) {
+            c = 17; // Yukarı Ok kodu
+        } else if (scancode == 0x50) {
+            c = 18; // Aşağı Ok kodu
+        } else {
+            if (shift_pressed) {
+                c = kbd_us_shifted[scancode]; // Shift basılıysa büyük harf
+            } else {
+                c = kbd_us[scancode];         // Değilse normal harf
+            }
+        }
+
+        // Karakteri (veya ok tuşu şifresini) kuyruğa (Buffer) güvenle ekle
         if (c != 0) {
             int next_head = (kbd_head + 1) % BUFFER_SIZE;
             if (next_head != kbd_tail) { 

@@ -30,25 +30,53 @@ unsigned int shape_color[MAX_SHAPES];
     char cmd_history[MAX_HISTORY][256];
     int history_count = 0; // Toplam kaç komut yazıldı
     int history_index = 0; // Ok tuşlarıyla gezinirken nerede olduğumuz
-// Masaüstü bileşenlerini DİNAMİK koordinatlarla çizen yardımcı fonksiyon
-// YENİ: Masaüstü arka plan rengi artık dışarıdan parametre alıyor!
-void draw_desktop(int win_x, int win_y, int win_w, int win_h, unsigned int desktop_bg) {
-    // 1. KATMAN: Masaüstü Arka Planı (En alt)
+    // ==========================================
+// PENCERE YÖNETİCİSİ (WINDOW MANAGER)
+// ==========================================
+#define MAX_WINDOWS 2
+
+typedef struct {
+    int id;
+    int x, y, w, h;
+    int is_open;
+    int is_dragging;
+    char title[32];
+} window_t;
+
+window_t windows[MAX_WINDOWS];
+int focused_window = 0; // Hangi pencere aktif?
+int any_window_dragging = 0; // Herhangi bir pencere sürükleniyor mu?
+
+// SADECE pencereyi çizen yeni, modüler fonksiyonumuz
+void draw_window(window_t* win) {
+    if (!win->is_open) return;
+    
+    // Pencere Gövdesi
+    draw_rect(win->x, win->y, win->w, win->h, 0x00F0F0F0); 
+    
+    // Z-Index Görselliği: Seçili olan pencerenin başlığı Mavi, arkadakilerin Gri olsun
+    unsigned int title_color = (win->id == focused_window) ? 0x000078D7 : 0x00777777;
+    draw_rect(win->x, win->y, win->w, 30, title_color); 
+    
+    // Kırmızı Kapatma (X) Butonu
+    draw_rect(win->x + win->w - 30, win->y, 30, 30, 0x00FF2D55); 
+    
+    // Başlık Yazısı
+    draw_string(win->x + 10, win->y + 8, win->title, 0x00FFFFFF, title_color);
+}
+
+// ARTIK SADECE ARKA PLANI VE ŞEKİLLERİ ÇİZER
+void draw_desktop(unsigned int desktop_bg) {
+    // 1. Masaüstü Arka Planı
     draw_rect(0, 0, 1024, 768, desktop_bg); 
 
-    // 2. KATMAN: Terminalden Gelen Özel Şekiller (Masaüstüne yapışık)
+    // 2. Terminalden Gelen Özel Şekiller
     for (int s = 0; s < shape_count; s++) {
         draw_rect(shape_x[s], shape_y[s], shape_w[s], shape_h[s], shape_color[s]);
     }
 
-    // 3. KATMAN: Görev Çubuğu (Üstte)
+    // 3. Görev Çubuğu
     draw_rect(0, 728, 1024, 40, 0x00111A); 
-
-    // 4. KATMAN: İşletim Sistemi Penceresi (En üstte - Sürüklenebilir)
-    draw_rect(win_x, win_y, win_w, win_h, 0x00F0F0F0); 
-    draw_rect(win_x, win_y, win_w, 30, 0x000078D7); 
-    draw_rect(win_x + win_w - 30, win_y, 30, 30, 0x00FF2D55); 
-    draw_string(win_x + 10, win_y + 8, "ArdaOS Terminali", 0x00FFFFFF, 0x000078D7);
 }
 int task1_counter = 0;
 
@@ -84,41 +112,50 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
         init_graphics(vesa_framebuffer, 1024, 768);
     }
 
-    // Donanım kesmelerini (Interrupts) serbest bırak
-   // ... (Üst kısımdaki init_gdt, paging, heap kodları aynı)
     init_timer(100);
     __asm__ __volatile__ ("sti");
 
-    int win_x = 300, win_y = 200, win_w = 400, win_h = 300;
-    int is_dragging = 0;
+    // ESKİ SABİT DEĞİŞKENLERİ VE İLK ÇİZİM KODLARINI SİLDİK
     int last_mouse_x = mouse_x, last_mouse_y = mouse_y;
 
-    // YENİ: Terminal Mimarisi
+    // Terminal Mimarisi
     unsigned int current_bg_color = 0x001B26; // Varsayılan arka plan
     char terminal_response[512] = "ArdaOS V0.1'e Hos Geldiniz!\n\nKullanilabilir Komutlar:\n- info\n- temizle\n- renk mavi\n- renk kirmizi";
-    
-    // Kullanıcının yazı yazdığı alan (Prompt)
     char user_input[256] = "Arda> "; 
-    int input_idx = 6; // İmleç "Arda> " yazısından sonra başlıyor
-    // CMOS yongasından (Gerçek Zamanlı Saat) veri okuyan fonksiyon
+    int input_idx = 6; 
+
+    // Saat için CMOS fonksiyonları (Zaten eklemiştin)
     unsigned char get_rtc_register(int reg) {
         outb(0x70, reg);
         return inb(0x71);
     }
-
-    // CMOS verileri BCD (Binary Coded Decimal) formatındadır, onu normal sayılara çeviririz
     unsigned char bcd_to_bin(unsigned char bcd) {
         return (bcd & 0x0F) + ((bcd >> 4) * 10);
     }
-    draw_desktop(win_x, win_y, win_w, win_h, current_bg_color); 
-    draw_string_wrapped(win_x + 10, win_y + 40, win_w - 20, terminal_response, 0x00000000, 0xFFFFFFFF);
-    draw_string_wrapped(win_x + 10, win_y + 250, win_w - 20, user_input, 0x000000AA, 0xFFFFFFFF);
-    draw_cursor(mouse_x, mouse_y); 
-    swap_buffers(); 
+
+    // Sayaçlar
     unsigned int system_ticks = 0;
     int last_second = -1;
+
+    // ==========================================
+    // PENCERELERİ KUR VE BAŞLAT
+    // ==========================================
+    
+    // Pencere 0: Terminalimiz
+    windows[0].id = 0; windows[0].is_open = 1; windows[0].is_dragging = 0;
+    windows[0].x = 100; windows[0].y = 100; windows[0].w = 450; windows[0].h = 350;
+    strcpy(windows[0].title, "ArdaOS Terminali");
+
+    // Pencere 1: Canlı Sistem Monitörü
+    windows[1].id = 1; windows[1].is_open = 1; windows[1].is_dragging = 0;
+    windows[1].x = 600; windows[1].y = 150; windows[1].w = 300; windows[1].h = 200;
+    strcpy(windows[1].title, "Sistem Monitoru");
+
+    focused_window = 0;
+
+    // (Buradan sonra while(1) döngün başlıyor, oraya dokunma!)
     while(1) {
-        system_ticks++; 
+        system_ticks++;
         int needs_redraw = 0;
 
         // 1. OLAY: SAAT KONTROLÜ
@@ -129,17 +166,62 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
         }
 
         // 2. OLAY: FARE KONTROLÜ
+        // --- 2. OLAY: GELİŞMİŞ FARE KONTROLÜ VE Z-INDEX (ESKİ FARE KODUNU BUNUNLA DEĞİŞTİR) ---
         int delta_x = mouse_x - last_mouse_x;
         int delta_y = mouse_y - last_mouse_y;
 
         if (delta_x != 0 || delta_y != 0) {
             needs_redraw = 1;
+
             if (mouse_left_button) {
-                if (!is_dragging && mouse_x >= win_x && mouse_x < (win_x + win_w) && mouse_y >= win_y && mouse_y < (win_y + 30)) {
-                    is_dragging = 1; 
+                if (!any_window_dragging) { 
+                    int clicked_window = -1;
+
+                    // Önce Z-Index'te en üstte olan (Focuslanmış) pencereye tıklanmış mı bak
+                    if (windows[focused_window].is_open &&
+                        mouse_x >= windows[focused_window].x && mouse_x <= windows[focused_window].x + windows[focused_window].w &&
+                        mouse_y >= windows[focused_window].y && mouse_y <= windows[focused_window].y + windows[focused_window].h) {
+                        clicked_window = focused_window;
+                    } else {
+                        // Diğer pencerelere bak
+                        for (int i = 0; i < MAX_WINDOWS; i++) {
+                            if (windows[i].is_open && i != focused_window &&
+                                mouse_x >= windows[i].x && mouse_x <= windows[i].x + windows[i].w &&
+                                mouse_y >= windows[i].y && mouse_y <= windows[i].y + windows[i].h) {
+                                clicked_window = i;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Eğer bir pencereye tıklandıysa:
+                    if (clicked_window != -1) {
+                        focused_window = clicked_window; // O pencereyi öne getir (Focus)
+
+                        // 1. Kırmızı X Butonuna mı tıkladı?
+                        if (mouse_x >= windows[focused_window].x + windows[focused_window].w - 30 &&
+                            mouse_x <= windows[focused_window].x + windows[focused_window].w &&
+                            mouse_y >= windows[focused_window].y && mouse_y <= windows[focused_window].y + 30) {
+                            windows[focused_window].is_open = 0; // Pencereyi KAPAT!
+                        }
+                        // 2. Başlık çubuğuna mı tıkladı? (Sürükleme)
+                        else if (mouse_y >= windows[focused_window].y && mouse_y <= windows[focused_window].y + 30) {
+                            windows[focused_window].is_dragging = 1;
+                            any_window_dragging = 1;
+                        }
+                    }
                 }
-                if (is_dragging) { win_x += delta_x; win_y += delta_y; }
-            } else { is_dragging = 0; }
+
+                // Sürükleme işlemi gerçekleşiyorsa pencere koordinatlarını güncelle
+                if (any_window_dragging && windows[focused_window].is_dragging) {
+                    windows[focused_window].x += delta_x;
+                    windows[focused_window].y += delta_y;
+                }
+            } else {
+                // Sol tık bırakıldığında sürüklemeleri sıfırla
+                for (int i = 0; i < MAX_WINDOWS; i++) windows[i].is_dragging = 0;
+                any_window_dragging = 0;
+            }
             last_mouse_x = mouse_x; last_mouse_y = mouse_y;
         }
 
@@ -352,36 +434,38 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
             }
         }
 
-        // --- 4. EKRANI GÜNCELLE (EKSİK OLAN KISIM BURASIYDI!) ---
+        // --- 4. EKRANI GÜNCELLE (ESKİ ÇİZİM KODUNU BUNUNLA DEĞİŞTİR) ---
         if (needs_redraw) {
-            // Masaüstünü çizerek eski pikselleri (izleri) temizle
-            draw_desktop(win_x, win_y, win_w, win_h, current_bg_color);
+            draw_desktop(current_bg_color); // Arka plan
             
-            // Terminal yazılarını pencerene bas
-            draw_string_wrapped(win_x + 10, win_y + 40, win_w - 20, terminal_response, 0x00000000, 0xFFFFFFFF); 
-            draw_string_wrapped(win_x + 10, win_y + 250, win_w - 20, user_input, 0x000000AA, 0xFFFFFFFF); 
+            // "Ressam Algoritması (Painter's Algorithm)" - Önce arkadakileri, sonra öndekini çiz
+            for (int i = 0; i < MAX_WINDOWS; i++) {
+                if (i != focused_window) draw_window(&windows[i]);
+            }
+            draw_window(&windows[focused_window]); // Focus olan en üste çizilir!
+
+            // İÇERİKLERİ YAZDIRMA AŞAMASI
+            // Terminal Penceresi açıksa yazılarını onun içine hizala
+            if (windows[0].is_open) {
+                draw_string_wrapped(windows[0].x + 10, windows[0].y + 40, windows[0].w - 20, terminal_response, 0x00000000, 0xFFFFFFFF); 
+                draw_string_wrapped(windows[0].x + 10, windows[0].y + windows[0].h - 30, windows[0].w - 20, user_input, 0x000000AA, 0xFFFFFFFF); 
+            }
+
+            // Sistem Monitörü açıksa içine canlı bilgileri yaz
+            if (windows[1].is_open) {
+                char info_text[128] = "Sistem Calisma Suresi:\n";
+                char sec_str[10];
+                itoa(current_second, sec_str);
+                strcat(info_text, sec_str);
+                strcat(info_text, " Saniye\n\nBellek Durumu: OK\nMultitasking: Aktif");
+                draw_string_wrapped(windows[1].x + 10, windows[1].y + 50, windows[1].w - 20, info_text, 0x00000000, 0xFFFFFFFF);
+            }
             
-            // Görev Çubuğuna Saat Widget'ı Çiziliyor
-            char taskbar_time[32] = "Uptime: ";
-            char sec_str[10];
-            itoa(current_second, sec_str);
-            strcat(taskbar_time, sec_str);
-            strcat(taskbar_time, " sn");
-            draw_string(900, 740, taskbar_time, 0x00FFFFFF, 0x00111A);
-
-            // Arka plan görevinin çalıştığını kanıtlayan canlı sayaç
-            char bg_text[32] = "Arka Plan (Task 1): ";
-            char count_str[10];
-            itoa(task1_counter, count_str);
-            strcat(bg_text, count_str);
-            draw_string(10, 740, bg_text, 0x0000FF00, 0x00111A); 
-
-            // İmleci bas ve ekranı monitöre fırlat
+            // ... (Görev çubuğu widget'ı ve imleç çizimleri aynen kalsın) ...
             draw_cursor(mouse_x, mouse_y);
             swap_buffers();
         }
 
-        // İşlemciyi diğer göreve devret ve uyu
         yield(); 
         __asm__ __volatile__ ("hlt"); 
     }

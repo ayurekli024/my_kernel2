@@ -13,17 +13,34 @@
 unsigned int* vesa_framebuffer;
 extern void outb(unsigned short port, unsigned char data);
 extern unsigned char inb(unsigned short port);
-
+// ==========================================
+// EKRAN LİSTESİ (DISPLAY LIST) HAFIZASI
+// ==========================================
+#define MAX_SHAPES 10
+int shape_count = 0;
+int shape_x[MAX_SHAPES];
+int shape_y[MAX_SHAPES];
+int shape_w[MAX_SHAPES];
+int shape_h[MAX_SHAPES];
+unsigned int shape_color[MAX_SHAPES];
 // Masaüstü bileşenlerini DİNAMİK koordinatlarla çizen yardımcı fonksiyon
 // YENİ: Masaüstü arka plan rengi artık dışarıdan parametre alıyor!
 void draw_desktop(int win_x, int win_y, int win_w, int win_h, unsigned int desktop_bg) {
-    // 1. Dinamik Masaüstü Arka Planı
+    // 1. KATMAN: Masaüstü Arka Planı (En alt)
     draw_rect(0, 0, 1024, 768, desktop_bg); 
 
-    draw_rect(0, 728, 1024, 40, 0x00111A); // Görev Çubuğu
-    draw_rect(win_x, win_y, win_w, win_h, 0x00F0F0F0); // Pencere
-    draw_rect(win_x, win_y, win_w, 30, 0x000078D7); // Başlık Çubuğu
-    draw_rect(win_x + win_w - 30, win_y, 30, 30, 0x00FF2D55); // Kapatma Butonu
+    // 2. KATMAN: Terminalden Gelen Özel Şekiller (Masaüstüne yapışık)
+    for (int s = 0; s < shape_count; s++) {
+        draw_rect(shape_x[s], shape_y[s], shape_w[s], shape_h[s], shape_color[s]);
+    }
+
+    // 3. KATMAN: Görev Çubuğu (Üstte)
+    draw_rect(0, 728, 1024, 40, 0x00111A); 
+
+    // 4. KATMAN: İşletim Sistemi Penceresi (En üstte - Sürüklenebilir)
+    draw_rect(win_x, win_y, win_w, win_h, 0x00F0F0F0); 
+    draw_rect(win_x, win_y, win_w, 30, 0x000078D7); 
+    draw_rect(win_x + win_w - 30, win_y, 30, 30, 0x00FF2D55); 
     draw_string(win_x + 10, win_y + 8, "ArdaOS Terminali", 0x00FFFFFF, 0x000078D7);
 }
 int task1_counter = 0;
@@ -227,7 +244,60 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
                         strcat(terminal_response, res_str);
                     }
                 }
-                
+                // YENİ KOMUT: Grafik API - Şekil Çizme
+                else if (strncmp(cmd, "ciz ", 4) == 0) {
+                    char* args = cmd + 4; // "ciz " kelimesinden sonrasını al
+                    
+                    if (strncmp(args, "temizle", 7) == 0) {
+                        shape_count = 0; // Sayacı sıfırlamak şekilleri ekrandan siler!
+                        strcpy(terminal_response, "Masaustu tuvali temizlendi!");
+                    }
+                    else if (strncmp(args, "dikdortgen ", 11) == 0) {
+                        if (shape_count < MAX_SHAPES) {
+                            int i = 11;
+                            
+                            // Parametreleri Boşluklardan Atlayarak Ayıkla
+                            while(args[i] == ' ') i++;
+                            int x = atoi(&args[i]);
+                            while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
+                            
+                            while(args[i] == ' ') i++;
+                            int y = atoi(&args[i]);
+                            while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
+                            
+                            while(args[i] == ' ') i++;
+                            int w = atoi(&args[i]);
+                            while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
+                            
+                            while(args[i] == ' ') i++;
+                            int h = atoi(&args[i]);
+                            while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
+                            
+                            // Rengi Belirle
+                            while(args[i] == ' ') i++;
+                            unsigned int c = 0x00FFFFFF; // Varsayılan: Beyaz
+                            if (strncmp(&args[i], "kirmizi", 7) == 0) c = 0x00FF2D55;
+                            else if (strncmp(&args[i], "yesil", 5) == 0) c = 0x0034C759;
+                            else if (strncmp(&args[i], "mavi", 4) == 0) c = 0x000078D7;
+                            else if (strncmp(&args[i], "sari", 4) == 0) c = 0x00FFCC00;
+
+                            // RAM'deki listeye kaydet
+                            shape_x[shape_count] = x;
+                            shape_y[shape_count] = y;
+                            shape_w[shape_count] = w;
+                            shape_h[shape_count] = h;
+                            shape_color[shape_count] = c;
+                            shape_count++;
+
+                            strcpy(terminal_response, "Sekil basariyla Ekran Listesine eklendi!");
+                        } else {
+                            strcpy(terminal_response, "Hata: Ekranda maksimum sekil sayisina (10) ulasildi!");
+                        }
+                    } 
+                    else {
+                        strcpy(terminal_response, "Hata: 'ciz dikdortgen <x> <y> <w> <h> <renk>' kullanin.");
+                    }
+                }
                 else if (strcmp(cmd, "") == 0) { } 
                 else {
                     strcpy(terminal_response, "Hata: Bilinmeyen komut! 'help' yazarak komutlari gorebilirsiniz.");

@@ -17,13 +17,16 @@ extern unsigned char inb(unsigned short port);
 // ==========================================
 // EKRAN LİSTESİ (DISPLAY LIST) HAFIZASI
 // ==========================================
-#define MAX_SHAPES 10
+#define MAX_SHAPES 200
 int shape_count = 0;
 int shape_x[MAX_SHAPES];
 int shape_y[MAX_SHAPES];
 int shape_w[MAX_SHAPES];
 int shape_h[MAX_SHAPES];
 unsigned int shape_color[MAX_SHAPES];
+
+volatile int force_redraw = 0;
+char last_game_key = 0;
 // Dışarıdan gelen API istekleri için kalıcı şekil ekleyici
 void api_add_shape(int x, int y, int w, int h, unsigned int color) {
     if (shape_count < MAX_SHAPES) {
@@ -33,7 +36,13 @@ void api_add_shape(int x, int y, int w, int h, unsigned int color) {
         shape_h[shape_count] = h;
         shape_color[shape_count] = color;
         shape_count++;
+        
     }
+    force_redraw = 1;
+}
+void api_clear_shapes() {
+    shape_count = 0;
+    force_redraw = 1;
 }
 // ==========================================
     // KOMUT GEÇMİŞİ (COMMAND HISTORY)
@@ -45,7 +54,7 @@ void api_add_shape(int x, int y, int w, int h, unsigned int color) {
     // ==========================================
 // PENCERE YÖNETİCİSİ (WINDOW MANAGER)
 // ==========================================
-#define MAX_WINDOWS 2
+#define MAX_WINDOWS 3
 
 typedef struct {
     int id;
@@ -79,16 +88,8 @@ void draw_window(window_t* win) {
 
 // ARTIK SADECE ARKA PLANI VE ŞEKİLLERİ ÇİZER
 void draw_desktop(unsigned int desktop_bg) {
-    // 1. Masaüstü Arka Planı
-    draw_rect(0, 0, 1024, 768, desktop_bg); 
-
-    // 2. Terminalden Gelen Özel Şekiller
-    for (int s = 0; s < shape_count; s++) {
-        draw_rect(shape_x[s], shape_y[s], shape_w[s], shape_h[s], shape_color[s]);
-    }
-
-    // 3. Görev Çubuğu
-    draw_rect(0, 728, 1024, 40, 0x00111A); 
+    draw_rect(0, 0, 1024, 768, desktop_bg); // Arka Plan
+    draw_rect(0, 728, 1024, 40, 0x00111A);  // Görev Çubuğu
 }
 int task1_counter = 0;
 
@@ -164,6 +165,11 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     windows[1].x = 600; windows[1].y = 150; windows[1].w = 300; windows[1].h = 200;
     strcpy(windows[1].title, "Sistem Monitoru");
 
+    // Pencere 2: Oyun Penceresi (Başlangıçta gizli)
+    windows[2].id = 2; windows[2].is_open = 0; windows[2].is_dragging = 0;
+    windows[2].x = 200; windows[2].y = 100; windows[2].w = 600; windows[2].h = 450;
+    strcpy(windows[2].title, "ArdaOS Yilan Oyunu");
+    
     focused_window = 0;
     // ==========================================
     // HARD DISK (ATA PIO) OKUMA/YAZMA TESTİ
@@ -261,241 +267,252 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
         // 3. OLAY: KLAVYE VE KOMUT PARSER
         char kbd_char = get_keyboard_char();
         if (kbd_char != 0) {
+            last_game_key = kbd_char;
             needs_redraw = 1;
-
-            if (kbd_char == '\n') { 
-                char* cmd = &user_input[6]; 
-                if (strcmp(cmd, "") != 0) {
-                    strcpy(cmd_history[history_count % MAX_HISTORY], cmd);
-                    history_count++;
-                    history_index = history_count; // İmleci en sona (yeni boşluğa) al
-                }
-                if (strcmp(cmd, "info") == 0) {
-                    strcpy(terminal_response, "Sistem: ArdaOS V0.1\nMimari: 32-bit x86\nCekirdek Durumu: Kararli\nGUI: Double-Buffered");
-                } 
-                else if (strcmp(cmd, "temizle") == 0) {
-                    strcpy(terminal_response, ""); 
-                } 
-                // ====================================================
-                // YENİ: HARİCİ UYGULAMA YÜKLEYİCİ (EXECUTABLE LOADER)
-                // ====================================================
-                else if (strcmp(cmd, "testapp") == 0) {
-                    // 1. Uygulama için RAM'de yer ayır (4 KB)
-                    unsigned char* app_memory = (unsigned char*)malloc(4096); 
-                    
-                    if (app_memory != 0) {
-                        // 2. Diske git ve FAT16 indeksimizden dosyayı bulup RAM'e çek
-                        int file_size = ardaos_read_file("TESTAPP ", "BIN", app_memory);
-                        
-                        if (file_size > 0) {
-                            // 3. RAM'deki bu rastgele byte yığınını bir "Fonksiyon İşaretçisine" (Function Pointer) çevir
-                            void (*app_entry)() = (void (*)())app_memory;
-                            
-                            // 4. Çekirdeğin Çoklu Görev (Multitasking) motoruna yeni bir görev olarak ekle!
-                            create_task(app_entry);
-                            
-                            strcpy(terminal_response, "[ BASARILI ] TESTAPP.BIN diskten okundu ve RAM'de calistirildi!\nEkrandaki yesil kareye bakin.");
-                        } else {
-                            free(app_memory); // Dosya yoksa RAM'i geri ver
-                            strcpy(terminal_response, "Hata: TESTAPP.BIN sanal diskte (c.img) bulunamadi.");
-                        }
-                    } else {
-                        strcpy(terminal_response, "Hata: Uygulamayi yuklemek icin yeterli RAM yok!");
+            if (!(windows[2].is_open && focused_window == 2)) {
+                if (kbd_char == '\n') { 
+                    char* cmd = &user_input[6]; 
+                    if (strcmp(cmd, "") != 0) {
+                        strcpy(cmd_history[history_count % MAX_HISTORY], cmd);
+                        history_count++;
+                        history_index = history_count; // İmleci en sona (yeni boşluğa) al
                     }
-                }
-                else if (strcmp(cmd, "renk mavi") == 0) {
-                    current_bg_color = 0x000000AA;
-                    strcpy(terminal_response, "Masaustu rengi mavi olarak degistirildi.");
-                } 
-                else if (strcmp(cmd, "renk kirmizi") == 0) {
-                    current_bg_color = 0x00AA0000;
-                    strcpy(terminal_response, "Masaustu rengi kirmizi olarak degistirildi.");
-                } 
-                else if (strcmp(cmd, "help") == 0) {
-                    strcpy(terminal_response, "KOMUTLAR:\n- help: Bu listeyi gosterir\n- info: Sistem detayi\n- temizle: Ekrani siler\n- renk [mavi/kirmizi]: Arkaplan\n- memorytest: RAM saglik testi\n- uptime: Calisma olay sayaci");
-                }
-                else if (strcmp(cmd, "memorytest") == 0) {
-                    void* test_ptr = malloc(1024); 
-                    if (test_ptr != 0) {
-                        free(test_ptr); 
-                        strcpy(terminal_response, "[ BASARILI ]\n1 KB Heap bellegi sorunsuz ayrildi ve iade edildi.");
-                    } else {
-                        strcpy(terminal_response, "[ DIKKAT - BASARISIZ ]\nHeap uzerinde yeterli bellek kalmadi. OOM Riski!");
-                    }
-                }
-                else if (strcmp(cmd, "uptime") == 0) {
-                    char sec_str[10];
-                    itoa(current_second, sec_str);
-                    strcpy(terminal_response, "Sistem Gercek Calisma Suresi: ");
-                    strcat(terminal_response, sec_str);
-                    strcat(terminal_response, " saniye");
-                }
-                else if (strcmp(cmd, "saat") == 0) {
-                    unsigned char h = bcd_to_bin(get_rtc_register(0x04));
-                    unsigned char m = bcd_to_bin(get_rtc_register(0x02));
-                    unsigned char s = bcd_to_bin(get_rtc_register(0x00));
-                    
-                    // UTC saatini Türkiye Saatine (UTC+3) uyarlıyoruz (Basitçe +3 ekliyoruz, 24'ü geçerse mod alıyoruz)
-                    h = (h + 3) % 24;
-                    
-                    char hs[10], ms[10], ss[10];
-                    itoa(h, hs); itoa(m, ms); itoa(s, ss);
-                    
-                    strcpy(terminal_response, "Gercek Donanim Saati (CMOS UTC+3): ");
-                    strcat(terminal_response, hs); strcat(terminal_response, ":");
-                    strcat(terminal_response, ms); strcat(terminal_response, ":");
-                    strcat(terminal_response, ss);
-                }
-                
-                // 2. YENİ KOMUT: Yankı (Parametre Okuma)
-                // Eğer komut "yanki " ile başlıyorsa (ilk 6 karakter)
-                else if (strncmp(cmd, "yanki ", 6) == 0) { 
-                    strcpy(terminal_response, "Sen dedin ki: ");
-                    strcat(terminal_response, cmd + 6); // 6. karakterden sonrasını al
-                }
-                
-                // 3. YENİ KOMUT: Hesap Makinesi
-                // Eğer komut "hesapla " ile başlıyorsa (ilk 8 karakter)
-                else if (strncmp(cmd, "hesapla ", 8) == 0) {
-                    int i = 8; // Komutun verisi 8. indisten başlıyor
-                    
-                    // İlk sayıyı al (Boşlukları atla)
-                    // İlk sayıyı al (Boşlukları atla)
-                    while(cmd[i] == ' ') i++;
-                    int num1 = atoi(&cmd[i]);
-                    
-                    // DÜZELTME: Öncelik hatasını engellemek için parantezler eklendi
-                    while((cmd[i] >= '0' && cmd[i] <= '9') || cmd[i] == '-') i++;
-                    
-                    while(cmd[i] == ' ') i++; // Boşlukları atla
-                    char op = cmd[i];
-                    i++;
-                    
-                    // İkinci sayıyı al
-                    while(cmd[i] == ' ') i++;
-                    int num2 = atoi(&cmd[i]);
-
-                    int result = 0;
-                    int valid = 1;
-                    
-                    // Mantıksal İşlemler
-                    if (op == '+') result = num1 + num2;
-                    else if (op == '-') result = num1 - num2;
-                    else if (op == '*') result = num1 * num2;
-                    else if (op == '/') {
-                        if (num2 == 0) { valid = 0; strcpy(terminal_response, "Hata: Sifira bolme yapilamaz!"); }
-                        else result = num1 / num2;
-                    } else {
-                        valid = 0;
-                        strcpy(terminal_response, "Gecersiz islem! Ornek kullanim: hesapla 25 + 14");
-                    }
-
-                    if (valid) {
-                        char res_str[32];
-                        itoa(result, res_str);
-                        strcpy(terminal_response, "Islem Sonucu: ");
-                        strcat(terminal_response, res_str);
-                    }
-                }
-                // YENİ KOMUT: Grafik API - Şekil Çizme
-                else if (strncmp(cmd, "ciz ", 4) == 0) {
-                    char* args = cmd + 4; // "ciz " kelimesinden sonrasını al
-                    
-                    if (strncmp(args, "temizle", 7) == 0) {
-                        shape_count = 0; // Sayacı sıfırlamak şekilleri ekrandan siler!
-                        strcpy(terminal_response, "Masaustu tuvali temizlendi!");
-                    }
-                    else if (strncmp(args, "dikdortgen ", 11) == 0) {
-                        if (shape_count < MAX_SHAPES) {
-                            int i = 11;
-                            
-                            // Parametreleri Boşluklardan Atlayarak Ayıkla
-                            while(args[i] == ' ') i++;
-                            int x = atoi(&args[i]);
-                            while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
-                            
-                            while(args[i] == ' ') i++;
-                            int y = atoi(&args[i]);
-                            while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
-                            
-                            while(args[i] == ' ') i++;
-                            int w = atoi(&args[i]);
-                            while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
-                            
-                            while(args[i] == ' ') i++;
-                            int h = atoi(&args[i]);
-                            while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
-                            
-                            // Rengi Belirle
-                            while(args[i] == ' ') i++;
-                            unsigned int c = 0x00FFFFFF; // Varsayılan: Beyaz
-                            if (strncmp(&args[i], "kirmizi", 7) == 0) c = 0x00FF2D55;
-                            else if (strncmp(&args[i], "yesil", 5) == 0) c = 0x0034C759;
-                            else if (strncmp(&args[i], "mavi", 4) == 0) c = 0x000078D7;
-                            else if (strncmp(&args[i], "sari", 4) == 0) c = 0x00FFCC00;
-
-                            // RAM'deki listeye kaydet
-                            shape_x[shape_count] = x;
-                            shape_y[shape_count] = y;
-                            shape_w[shape_count] = w;
-                            shape_h[shape_count] = h;
-                            shape_color[shape_count] = c;
-                            shape_count++;
-
-                            strcpy(terminal_response, "Sekil basariyla Ekran Listesine eklendi!");
-                        } else {
-                            strcpy(terminal_response, "Hata: Ekranda maksimum sekil sayisina (10) ulasildi!");
-                        }
+                    if (strcmp(cmd, "info") == 0) {
+                        strcpy(terminal_response, "Sistem: ArdaOS V0.1\nMimari: 32-bit x86\nCekirdek Durumu: Kararli\nGUI: Double-Buffered");
                     } 
-                    else {
-                        strcpy(terminal_response, "Hata: 'ciz dikdortgen <x> <y> <w> <h> <renk>' kullanin.");
+                    else if (strcmp(cmd, "temizle") == 0) {
+                        strcpy(terminal_response, ""); 
+                    } 
+                    // ====================================================
+                    // YENİ: HARİCİ UYGULAMA YÜKLEYİCİ (EXECUTABLE LOADER)
+                    // ====================================================
+                    else if (strcmp(cmd, "testapp") == 0) {
+                        windows[2].is_open = 1; // Oyun penceresini aç!
+                        focused_window = 2;
+                        // 1. Uygulama için RAM'de yer ayır (4 KB)
+                        unsigned char* app_memory = (unsigned char*)malloc(4096); 
+                        
+                        if (app_memory != 0) {
+                            // 2. Diske git ve FAT16 indeksimizden dosyayı bulup RAM'e çek
+                            int file_size = ardaos_read_file("TESTAPP ", "BIN", app_memory);
+                            
+                            if (file_size > 0) {
+                                // 3. RAM'deki bu rastgele byte yığınını bir "Fonksiyon İşaretçisine" (Function Pointer) çevir
+                                void (*app_entry)() = (void (*)())app_memory;
+                                
+                                // 4. Çekirdeğin Çoklu Görev (Multitasking) motoruna yeni bir görev olarak ekle!
+                                create_task(app_entry);
+                                
+                                strcpy(terminal_response, "[ BASARILI ] TESTAPP.BIN diskten okundu ve RAM'de calistirildi!\nEkrandaki yesil kareye bakin.");
+                            } else {
+                                free(app_memory); // Dosya yoksa RAM'i geri ver
+                                strcpy(terminal_response, "Hata: TESTAPP.BIN sanal diskte (c.img) bulunamadi.");
+                            }
+                        } else {
+                            strcpy(terminal_response, "Hata: Uygulamayi yuklemek icin yeterli RAM yok!");
+                        }
                     }
-                }
-                else if (strcmp(cmd, "") == 0) { } 
-                else {
-                    strcpy(terminal_response, "Hata: Bilinmeyen komut! 'help' yazarak komutlari gorebilirsiniz.");
-                }
+                    else if (strcmp(cmd, "renk mavi") == 0) {
+                        current_bg_color = 0x000000AA;
+                        strcpy(terminal_response, "Masaustu rengi mavi olarak degistirildi.");
+                    } 
+                    else if (strcmp(cmd, "renk kirmizi") == 0) {
+                        current_bg_color = 0x00AA0000;
+                        strcpy(terminal_response, "Masaustu rengi kirmizi olarak degistirildi.");
+                    } 
+                    else if (strcmp(cmd, "help") == 0) {
+                        strcpy(terminal_response, "KOMUTLAR:\n- help: Bu listeyi gosterir\n- info: Sistem detayi\n- temizle: Ekrani siler\n- renk [mavi/kirmizi]: Arkaplan\n- memorytest: RAM saglik testi\n- uptime: Calisma olay sayaci");
+                    }
+                    // ====================================================
+                    // YENİ: DİSK LİSTELEME KOMUTU (ls / dir)
+                    // ====================================================
+                    else if (strcmp(cmd, "ls") == 0 || strcmp(cmd, "dir") == 0) {
+                        ardaos_list_files(terminal_response);
+                    }
+                    else if (strcmp(cmd, "memorytest") == 0) {
+                        void* test_ptr = malloc(1024); 
+                        if (test_ptr != 0) {
+                            free(test_ptr); 
+                            strcpy(terminal_response, "[ BASARILI ]\n1 KB Heap bellegi sorunsuz ayrildi ve iade edildi.");
+                        } else {
+                            strcpy(terminal_response, "[ DIKKAT - BASARISIZ ]\nHeap uzerinde yeterli bellek kalmadi. OOM Riski!");
+                        }
+                    }
+                    else if (strcmp(cmd, "uptime") == 0) {
+                        char sec_str[10];
+                        itoa(current_second, sec_str);
+                        strcpy(terminal_response, "Sistem Gercek Calisma Suresi: ");
+                        strcat(terminal_response, sec_str);
+                        strcat(terminal_response, " saniye");
+                    }
+                    else if (strcmp(cmd, "saat") == 0) {
+                        unsigned char h = bcd_to_bin(get_rtc_register(0x04));
+                        unsigned char m = bcd_to_bin(get_rtc_register(0x02));
+                        unsigned char s = bcd_to_bin(get_rtc_register(0x00));
+                        
+                        // UTC saatini Türkiye Saatine (UTC+3) uyarlıyoruz (Basitçe +3 ekliyoruz, 24'ü geçerse mod alıyoruz)
+                        h = (h + 3) % 24;
+                        
+                        char hs[10], ms[10], ss[10];
+                        itoa(h, hs); itoa(m, ms); itoa(s, ss);
+                        
+                        strcpy(terminal_response, "Gercek Donanim Saati (CMOS UTC+3): ");
+                        strcat(terminal_response, hs); strcat(terminal_response, ":");
+                        strcat(terminal_response, ms); strcat(terminal_response, ":");
+                        strcat(terminal_response, ss);
+                    }
+                    
+                    // 2. YENİ KOMUT: Yankı (Parametre Okuma)
+                    // Eğer komut "yanki " ile başlıyorsa (ilk 6 karakter)
+                    else if (strncmp(cmd, "yanki ", 6) == 0) { 
+                        strcpy(terminal_response, "Sen dedin ki: ");
+                        strcat(terminal_response, cmd + 6); // 6. karakterden sonrasını al
+                    }
+                    
+                    // 3. YENİ KOMUT: Hesap Makinesi
+                    // Eğer komut "hesapla " ile başlıyorsa (ilk 8 karakter)
+                    else if (strncmp(cmd, "hesapla ", 8) == 0) {
+                        int i = 8; // Komutun verisi 8. indisten başlıyor
+                        
+                        // İlk sayıyı al (Boşlukları atla)
+                        // İlk sayıyı al (Boşlukları atla)
+                        while(cmd[i] == ' ') i++;
+                        int num1 = atoi(&cmd[i]);
+                        
+                        // DÜZELTME: Öncelik hatasını engellemek için parantezler eklendi
+                        while((cmd[i] >= '0' && cmd[i] <= '9') || cmd[i] == '-') i++;
+                        
+                        while(cmd[i] == ' ') i++; // Boşlukları atla
+                        char op = cmd[i];
+                        i++;
+                        
+                        // İkinci sayıyı al
+                        while(cmd[i] == ' ') i++;
+                        int num2 = atoi(&cmd[i]);
 
-                strcpy(user_input, "Arda> ");
-                input_idx = 6;
-            } 
-            else if (kbd_char == 17) { 
-                if (history_count > 0 && history_index > 0) {
-                    history_index--; // Bir önceki komuta git
+                        int result = 0;
+                        int valid = 1;
+                        
+                        // Mantıksal İşlemler
+                        if (op == '+') result = num1 + num2;
+                        else if (op == '-') result = num1 - num2;
+                        else if (op == '*') result = num1 * num2;
+                        else if (op == '/') {
+                            if (num2 == 0) { valid = 0; strcpy(terminal_response, "Hata: Sifira bolme yapilamaz!"); }
+                            else result = num1 / num2;
+                        } else {
+                            valid = 0;
+                            strcpy(terminal_response, "Gecersiz islem! Ornek kullanim: hesapla 25 + 14");
+                        }
+
+                        if (valid) {
+                            char res_str[32];
+                            itoa(result, res_str);
+                            strcpy(terminal_response, "Islem Sonucu: ");
+                            strcat(terminal_response, res_str);
+                        }
+                    }
+                    // YENİ KOMUT: Grafik API - Şekil Çizme
+                    else if (strncmp(cmd, "ciz ", 4) == 0) {
+                        char* args = cmd + 4; // "ciz " kelimesinden sonrasını al
+                        
+                        if (strncmp(args, "temizle", 7) == 0) {
+                            shape_count = 0; // Sayacı sıfırlamak şekilleri ekrandan siler!
+                            strcpy(terminal_response, "Masaustu tuvali temizlendi!");
+                        }
+                        else if (strncmp(args, "dikdortgen ", 11) == 0) {
+                            if (shape_count < MAX_SHAPES) {
+                                int i = 11;
+                                
+                                // Parametreleri Boşluklardan Atlayarak Ayıkla
+                                while(args[i] == ' ') i++;
+                                int x = atoi(&args[i]);
+                                while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
+                                
+                                while(args[i] == ' ') i++;
+                                int y = atoi(&args[i]);
+                                while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
+                                
+                                while(args[i] == ' ') i++;
+                                int w = atoi(&args[i]);
+                                while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
+                                
+                                while(args[i] == ' ') i++;
+                                int h = atoi(&args[i]);
+                                while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
+                                
+                                // Rengi Belirle
+                                while(args[i] == ' ') i++;
+                                unsigned int c = 0x00FFFFFF; // Varsayılan: Beyaz
+                                if (strncmp(&args[i], "kirmizi", 7) == 0) c = 0x00FF2D55;
+                                else if (strncmp(&args[i], "yesil", 5) == 0) c = 0x0034C759;
+                                else if (strncmp(&args[i], "mavi", 4) == 0) c = 0x000078D7;
+                                else if (strncmp(&args[i], "sari", 4) == 0) c = 0x00FFCC00;
+
+                                // RAM'deki listeye kaydet
+                                shape_x[shape_count] = x;
+                                shape_y[shape_count] = y;
+                                shape_w[shape_count] = w;
+                                shape_h[shape_count] = h;
+                                shape_color[shape_count] = c;
+                                shape_count++;
+
+                                strcpy(terminal_response, "Sekil basariyla Ekran Listesine eklendi!");
+                            } else {
+                                strcpy(terminal_response, "Hata: Ekranda maksimum sekil sayisina (10) ulasildi!");
+                            }
+                        } 
+                        else {
+                            strcpy(terminal_response, "Hata: 'ciz dikdortgen <x> <y> <w> <h> <renk>' kullanin.");
+                        }
+                    }
+                    else if (strcmp(cmd, "") == 0) { } 
+                    else {
+                        strcpy(terminal_response, "Hata: Bilinmeyen komut! 'help' yazarak komutlari gorebilirsiniz.");
+                    }
+
                     strcpy(user_input, "Arda> ");
-                    strcat(user_input, cmd_history[history_index % MAX_HISTORY]);
-                    input_idx = 6 + strlen(cmd_history[history_index % MAX_HISTORY]);
-                }
-            }
-            // YENİ: AŞAĞI OK TUŞU (Günümüze Dön)
-            else if (kbd_char == 18) { 
-                if (history_index < history_count) {
-                    history_index++; // Bir sonraki komuta git
-                    if (history_index == history_count) {
-                        // En sona (günümüze) geldiysek satırı temizle
-                        strcpy(user_input, "Arda> ");
-                        input_idx = 6;
-                    } else {
-                        // Aradaki bir komuttaysak onu yazdır
+                    input_idx = 6;
+                } 
+                else if (kbd_char == 17) { 
+                    if (history_count > 0 && history_index > 0) {
+                        history_index--; // Bir önceki komuta git
                         strcpy(user_input, "Arda> ");
                         strcat(user_input, cmd_history[history_index % MAX_HISTORY]);
                         input_idx = 6 + strlen(cmd_history[history_index % MAX_HISTORY]);
                     }
                 }
-            }
-            else if (kbd_char == '\b' && input_idx > 6) { 
-                input_idx--;
-                user_input[input_idx] = '\0';
-            } 
-            else if (input_idx < 255 && kbd_char != '\b' && kbd_char != '\n') { 
-                user_input[input_idx] = kbd_char;
-                input_idx++;
-                user_input[input_idx] = '\0'; 
+                // YENİ: AŞAĞI OK TUŞU (Günümüze Dön)
+                else if (kbd_char == 18) { 
+                    if (history_index < history_count) {
+                        history_index++; // Bir sonraki komuta git
+                        if (history_index == history_count) {
+                            // En sona (günümüze) geldiysek satırı temizle
+                            strcpy(user_input, "Arda> ");
+                            input_idx = 6;
+                        } else {
+                            // Aradaki bir komuttaysak onu yazdır
+                            strcpy(user_input, "Arda> ");
+                            strcat(user_input, cmd_history[history_index % MAX_HISTORY]);
+                            input_idx = 6 + strlen(cmd_history[history_index % MAX_HISTORY]);
+                        }
+                    }
+                }
+                else if (kbd_char == '\b' && input_idx > 6) { 
+                    input_idx--;
+                    user_input[input_idx] = '\0';
+                } 
+                else if (input_idx < 255 && kbd_char != '\b' && kbd_char != '\n') { 
+                    user_input[input_idx] = kbd_char;
+                    input_idx++;
+                    user_input[input_idx] = '\0'; 
+                }
             }
         }
 
         // --- 4. EKRANI GÜNCELLE ---
-        if (needs_redraw) {
+        if (needs_redraw|| force_redraw) {
+            force_redraw = 0;
             draw_desktop(current_bg_color); // Arka plan
             
             // DÜZELTME: Pencereleri ve içeriklerini Z-Index sırasına göre (Arkadakinden öndekine) çizen kuyruk mantığı
@@ -528,6 +545,16 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
                     strcat(info_text, sec_str);
                     strcat(info_text, " Saniye\n\nBellek Durumu: OK\nMultitasking: Aktif");
                     draw_string_wrapped(windows[1].x + 10, windows[1].y + 50, windows[1].w - 20, info_text, 0x00000000, 0xFFFFFFFF);
+                }
+                else if (w_idx == 2) {
+                    // Oyun ekranının arka planı siyah olsun (Pencere başlığının altından başlar)
+                    draw_rect(windows[2].x + 2, windows[2].y + 32, windows[2].w - 4, windows[2].h - 34, 0x00000000);
+                    
+                    // Şekilleri SADECE bu pencerenin İÇİNE göre çiz!
+                    for (int s = 0; s < shape_count; s++) {
+                        // shape_x ve y artık ekrana göre değil, pencereye göredir
+                        draw_rect(windows[2].x + shape_x[s], windows[2].y + 32 + shape_y[s], shape_w[s], shape_h[s], shape_color[s]);
+                    }
                 }
             }
 

@@ -21,4 +21,5 @@ void ata_lba_write(unsigned int lba, unsigned char sector_count, unsigned short*
 int ardaos_read_file(const char* filename, const char* ext, unsigned char* target_buffer);
 int ardaos_write_file(const char* filename, const char* ext, unsigned int start_sector, unsigned int size, unsigned char* source_buffer);
 
+void ardaos_list_files(char* output_buffer);
 #endif

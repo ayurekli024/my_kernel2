@@ -38,6 +38,8 @@ void pic_remap(void) {
 // ... (Üst kısımdaki pic_remap ve struct tanımları aynı kalacak) ...
 extern void yield(void);
 extern void api_add_shape(int x, int y, int w, int h, unsigned int color);
+extern char last_game_key;
+extern void api_clear_shapes(void);
 // Yeni Eklenen Dış Bağlantılar
 extern void isr_default_ex(void);
 extern void isr_default_int(void);
@@ -147,6 +149,16 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         api_add_shape(arg1, arg2, arg3, arg4, arg5);
         return 1;
     }
+     
+    else if (sys_num == 6) {
+        char key = last_game_key;
+        last_game_key = 0; // Bir kere okuyunca sıfırla ki yılan sürekli aynı yöne gitmesin
+        return key;
+    }
+    else if (sys_num == 7) {
+        api_clear_shapes();
+        return 1;
+    }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
-    return -1; 
+    return -1;
 }

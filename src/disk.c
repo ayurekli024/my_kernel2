@@ -103,3 +103,45 @@ int ardaos_write_file(const char* filename, const char* ext, unsigned int start_
     ata_lba_write(19, 1, (unsigned short*)root_dir);
     return 0; // Başarılı
 }
+// Kök dizindeki (Sektör 19) tüm dosyaları bulur ve metin formatında tampona yazar
+void ardaos_list_files(char* output_buffer) {
+    directory_entry_t root_dir[16];
+    
+    // Diskin kök dizinini RAM'e çek
+    ata_lba_read(19, 1, (unsigned short*)root_dir);
+    
+    strcpy(output_buffer, "=== c.img DISK ICERIGI ===\n");
+    
+    int found = 0;
+    for (int i = 0; i < 16; i++) {
+        // Eğer dosya adının ilk harfi 0 ise bu slot boştur, atla
+        if (root_dir[i].name[0] != 0) {
+            found++;
+            
+            // 8 karakterlik ismi ve 3 karakterlik uzantıyı güvenli metne çevir
+            char temp_name[9];
+            char temp_ext[4];
+            for(int j=0; j<8; j++) temp_name[j] = root_dir[i].name[j];
+            for(int j=0; j<3; j++) temp_ext[j] = root_dir[i].ext[j];
+            temp_name[8] = '\0';
+            temp_ext[3] = '\0';
+            
+            // Dosya boyutunu metne (string) çevir
+            char size_str[16];
+            itoa(root_dir[i].size, size_str);
+            
+            // Format: "- TESTAPP .BIN  (152 Bayt)\n"
+            strcat(output_buffer, "- ");
+            strcat(output_buffer, temp_name);
+            strcat(output_buffer, ".");
+            strcat(output_buffer, temp_ext);
+            strcat(output_buffer, "   (");
+            strcat(output_buffer, size_str);
+            strcat(output_buffer, " Bayt)\n");
+        }
+    }
+    
+    if (found == 0) {
+        strcat(output_buffer, "Disk tamamen bos.");
+    }
+}

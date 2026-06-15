@@ -217,3 +217,33 @@ gdt_flush:
     jmp 0x08:.flush
 .flush:
     ret
+
+; =================================================================
+; 3. SİSTEM ÇAĞRILARI (SYSCALLS - INT 0x80)
+; =================================================================
+global syscall_handler
+extern syscall_handler_main
+
+syscall_handler:
+    cli
+    pusha               ; Uygulamanın o anki tüm CPU yazmaçlarını yığına kaydet
+
+    ; CDECL Standardı: C fonksiyonuna parametreleri sağdan sola itiyoruz!
+    ; Uygulamanın doldurduğu yazmaçları alıp C fonksiyonuna argüman yapıyoruz:
+    push edi            ; arg5
+    push esi            ; arg4
+    push edx            ; arg3
+    push ecx            ; arg2
+    push ebx            ; arg1
+    push eax            ; sys_num (Çağrılmak istenen API numarası)
+    
+    call syscall_handler_main
+    add esp, 24         ; 6 parametre x 4 bayt = 24 baytlık yığını temizle
+    
+    ; Sihirli Dokunuş: C fonksiyonundan dönen (return) sonuç EAX yazmacındadır.
+    ; Biz de bu sonucu, pusha ile kaydedilmiş eski EAX'in üzerine yazıyoruz ki 
+    ; uygulama cevabı okuyarabilsin! (pusha diziliminde EAX 28 bayt yukarıdadır)
+    mov [esp + 28], eax 
+    
+    popa                ; Yazmaçları eski haline getir (Yeni EAX ile birlikte)
+    iretd               ; Uygulamaya geri dön

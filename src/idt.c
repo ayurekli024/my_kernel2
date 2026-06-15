@@ -36,7 +36,8 @@ void pic_remap(void) {
     outb(0xA1, 0xEF); 
 }
 // ... (Üst kısımdaki pic_remap ve struct tanımları aynı kalacak) ...
-
+extern void yield(void);
+extern void api_add_shape(int x, int y, int w, int h, unsigned int color);
 // Yeni Eklenen Dış Bağlantılar
 extern void isr_default_ex(void);
 extern void isr_default_int(void);
@@ -47,6 +48,7 @@ extern void isr14(void);
 extern void keyboard_handler(void);
 extern void mouse_handler(void);
 extern void timer_handler(void);
+extern void syscall_handler(void);
 
 // Mavi Ekran (BSOD) Motoru
 void fault_handler(int int_no, int err_code) {
@@ -107,6 +109,44 @@ void init_idt(void) {
     // Kendi yazdığımız donanım sürücüleri
     idt_set_gate(33, (unsigned long)keyboard_handler, 0x08, 0x8E);
     idt_set_gate(44, (unsigned long)mouse_handler, 0x08, 0x8E);
-    
+    idt_set_gate(128, (unsigned long)syscall_handler, 0x08, 0x8E);
     __asm__ __volatile__ ("lidt %0" : : "m" (idt_ptr));
+}
+// ==========================================
+// ARDAOS API MERKEZİ (SYSCALL ROUTER)
+// ==========================================
+int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int arg2, unsigned int arg3, unsigned int arg4, unsigned int arg5) {
+    
+    // API No 1: Nokta Çiz (put_pixel)
+    // Beklenen: arg1=x, arg2=y, arg3=color
+    if (sys_num == 1) {
+        put_pixel(arg1, arg2, arg3);
+        return 1; // Başarılı
+    }
+    
+    // API No 2: Dikdörtgen/Pencere Çiz (draw_rect)
+    // Beklenen: arg1=x, arg2=y, arg3=w, arg4=h, arg5=color
+    else if (sys_num == 2) {
+        draw_rect(arg1, arg2, arg3, arg4, arg5);
+        return 1; 
+    }
+    
+    // API No 3: Ekrana Yazı Yaz (draw_string)
+    // Beklenen: arg1=x, arg2=y, arg3=metin_adresi, arg4=fg_color, arg5=bg_color
+    else if (sys_num == 3) {
+        draw_string(arg1, arg2, (const char*)arg3, arg4, arg5);
+        return 1;
+    }
+    else if (sys_num == 4) {
+        yield();
+        return 1;
+    }
+    
+    // API No 5: Masaüstüne Kalıcı Şekil Ekle (Ekran silinse bile kalır)
+    else if (sys_num == 5) {
+        api_add_shape(arg1, arg2, arg3, arg4, arg5);
+        return 1;
+    }
+    // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
+    return -1; 
 }

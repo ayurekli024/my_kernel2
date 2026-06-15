@@ -39,8 +39,8 @@ $(ISO_TARGET): $(TARGET) grub.cfg
 	rm -rf isodir
 
 # 3. Aşama: QEMU'yu CD-ROM modunda ISO ile başlat
-run: $(ISO_TARGET)
-	qemu-system-i386 -cdrom $(ISO_TARGET)
+run: myos.iso
+	qemu-system-i386 -cdrom myos.iso -hda c.img
 
 # Temizlik (ISO ve isodir temizliği eklendi)
 clean:

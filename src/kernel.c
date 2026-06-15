@@ -9,6 +9,7 @@
 #include "gdt.h"
 #include "keyboard.h"
 #include "string.h"
+#include "disk.h"
 
 unsigned int* vesa_framebuffer;
 extern void outb(unsigned short port, unsigned char data);
@@ -23,6 +24,17 @@ int shape_y[MAX_SHAPES];
 int shape_w[MAX_SHAPES];
 int shape_h[MAX_SHAPES];
 unsigned int shape_color[MAX_SHAPES];
+// Dışarıdan gelen API istekleri için kalıcı şekil ekleyici
+void api_add_shape(int x, int y, int w, int h, unsigned int color) {
+    if (shape_count < MAX_SHAPES) {
+        shape_x[shape_count] = x;
+        shape_y[shape_count] = y;
+        shape_w[shape_count] = w;
+        shape_h[shape_count] = h;
+        shape_color[shape_count] = color;
+        shape_count++;
+    }
+}
 // ==========================================
     // KOMUT GEÇMİŞİ (COMMAND HISTORY)
     // ==========================================
@@ -83,6 +95,7 @@ int task1_counter = 0;
 // İKİNCİ ÇEKİRDEK GÖREVİ (Sonsuz Döngü 2)
 void background_task() {
     while(1) {
+        __asm__ __volatile__("sti");
         task1_counter++; // Kendi işini yap
         yield();         // İşlemciyi nazikçe masaüstü döngüsüne geri ver
     }
@@ -152,7 +165,27 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     strcpy(windows[1].title, "Sistem Monitoru");
 
     focused_window = 0;
+    // ==========================================
+    // HARD DISK (ATA PIO) OKUMA/YAZMA TESTİ
+    // ==========================================
+    
+    // 1. Diske yazılacak veriyi hazırla (512 bayt boyutunda, çünkü sektörler 512 bayttır)
+    char write_buffer[512] = "Merhaba Arda! Bu yazi tamamen RAM disindan, fiziksel Hard Diskten okunmustur!";
+    
+    // 2. Diskin 5. Sektörüne (LBA 5) bu yazıyı kaydet!
+    ata_lba_write(5, 1, (unsigned short*)write_buffer);
 
+    // 3. Yazının gerçekten diske gidip gitmediğini kanıtlamak için boş bir okuma alanı yarat
+    char read_buffer[512];
+    for(int i=0; i<512; i++) read_buffer[i] = 0; // İçi bomboş olsun
+
+    // 4. Diskin 5. Sektöründen veriyi oku ve boş olan read_buffer'a aktar
+    ata_lba_read(5, 1, (unsigned short*)read_buffer);
+
+    // 5. Okunan bu veriyi doğrudan terminalin varsayılan karşılama mesajına ekle!
+    strcpy(terminal_response, "ArdaOS Disk Testi Sonucu:\n[ ");
+    strcat(terminal_response, read_buffer);
+    strcat(terminal_response, " ]\n\n- info\n- temizle\n- hesapla");
     // (Buradan sonra while(1) döngün başlıyor, oraya dokunma!)
     while(1) {
         system_ticks++;
@@ -243,6 +276,33 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
                 else if (strcmp(cmd, "temizle") == 0) {
                     strcpy(terminal_response, ""); 
                 } 
+                // ====================================================
+                // YENİ: HARİCİ UYGULAMA YÜKLEYİCİ (EXECUTABLE LOADER)
+                // ====================================================
+                else if (strcmp(cmd, "testapp") == 0) {
+                    // 1. Uygulama için RAM'de yer ayır (4 KB)
+                    unsigned char* app_memory = (unsigned char*)malloc(4096); 
+                    
+                    if (app_memory != 0) {
+                        // 2. Diske git ve FAT16 indeksimizden dosyayı bulup RAM'e çek
+                        int file_size = ardaos_read_file("TESTAPP ", "BIN", app_memory);
+                        
+                        if (file_size > 0) {
+                            // 3. RAM'deki bu rastgele byte yığınını bir "Fonksiyon İşaretçisine" (Function Pointer) çevir
+                            void (*app_entry)() = (void (*)())app_memory;
+                            
+                            // 4. Çekirdeğin Çoklu Görev (Multitasking) motoruna yeni bir görev olarak ekle!
+                            create_task(app_entry);
+                            
+                            strcpy(terminal_response, "[ BASARILI ] TESTAPP.BIN diskten okundu ve RAM'de calistirildi!\nEkrandaki yesil kareye bakin.");
+                        } else {
+                            free(app_memory); // Dosya yoksa RAM'i geri ver
+                            strcpy(terminal_response, "Hata: TESTAPP.BIN sanal diskte (c.img) bulunamadi.");
+                        }
+                    } else {
+                        strcpy(terminal_response, "Hata: Uygulamayi yuklemek icin yeterli RAM yok!");
+                    }
+                }
                 else if (strcmp(cmd, "renk mavi") == 0) {
                     current_bg_color = 0x000000AA;
                     strcpy(terminal_response, "Masaustu rengi mavi olarak degistirildi.");
@@ -434,39 +494,64 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
             }
         }
 
-        // --- 4. EKRANI GÜNCELLE (ESKİ ÇİZİM KODUNU BUNUNLA DEĞİŞTİR) ---
+        // --- 4. EKRANI GÜNCELLE ---
         if (needs_redraw) {
             draw_desktop(current_bg_color); // Arka plan
             
-            // "Ressam Algoritması (Painter's Algorithm)" - Önce arkadakileri, sonra öndekini çiz
-            for (int i = 0; i < MAX_WINDOWS; i++) {
-                if (i != focused_window) draw_window(&windows[i]);
-            }
-            draw_window(&windows[focused_window]); // Focus olan en üste çizilir!
-
-            // İÇERİKLERİ YAZDIRMA AŞAMASI
-            // Terminal Penceresi açıksa yazılarını onun içine hizala
-            if (windows[0].is_open) {
-                draw_string_wrapped(windows[0].x + 10, windows[0].y + 40, windows[0].w - 20, terminal_response, 0x00000000, 0xFFFFFFFF); 
-                draw_string_wrapped(windows[0].x + 10, windows[0].y + windows[0].h - 30, windows[0].w - 20, user_input, 0x000000AA, 0xFFFFFFFF); 
-            }
-
-            // Sistem Monitörü açıksa içine canlı bilgileri yaz
-            if (windows[1].is_open) {
-                char info_text[128] = "Sistem Calisma Suresi:\n";
-                char sec_str[10];
-                itoa(current_second, sec_str);
-                strcat(info_text, sec_str);
-                strcat(info_text, " Saniye\n\nBellek Durumu: OK\nMultitasking: Aktif");
-                draw_string_wrapped(windows[1].x + 10, windows[1].y + 50, windows[1].w - 20, info_text, 0x00000000, 0xFFFFFFFF);
-            }
+            // DÜZELTME: Pencereleri ve içeriklerini Z-Index sırasına göre (Arkadakinden öndekine) çizen kuyruk mantığı
+            int draw_order[MAX_WINDOWS];
+            int order_idx = 0;
             
-            // ... (Görev çubuğu widget'ı ve imleç çizimleri aynen kalsın) ...
+            // 1. Önce arkadaki pencereleri kuyruğa ekle
+            for (int i = 0; i < MAX_WINDOWS; i++) {
+                if (i != focused_window) draw_order[order_idx++] = i;
+            }
+            // 2. En son odaklanılan (Focus) pencereyi kuyruğa ekle ki en üste çizilsin
+            draw_order[order_idx++] = focused_window;
+
+            // 3. Kuyruğu sırayla çiz (İskelet + İçerik)
+            for (int i = 0; i < MAX_WINDOWS; i++) {
+                int w_idx = draw_order[i];
+                if (!windows[w_idx].is_open) continue;
+                
+                draw_window(&windows[w_idx]); // Önce pencerenin iskeleti
+                
+                // Hemen ardından SADECE o pencerenin içeriğini yazdır!
+                if (w_idx == 0) {
+                    draw_string_wrapped(windows[0].x + 10, windows[0].y + 40, windows[0].w - 20, terminal_response, 0x00000000, 0xFFFFFFFF); 
+                    draw_string_wrapped(windows[0].x + 10, windows[0].y + windows[0].h - 30, windows[0].w - 20, user_input, 0x000000AA, 0xFFFFFFFF); 
+                } 
+                else if (w_idx == 1) {
+                    char info_text[128] = "Sistem Calisma Suresi:\n";
+                    char sec_str[10];
+                    itoa(current_second, sec_str);
+                    strcat(info_text, sec_str);
+                    strcat(info_text, " Saniye\n\nBellek Durumu: OK\nMultitasking: Aktif");
+                    draw_string_wrapped(windows[1].x + 10, windows[1].y + 50, windows[1].w - 20, info_text, 0x00000000, 0xFFFFFFFF);
+                }
+            }
+
+            // --- HARİCİ UYGULAMA SİMÜLASYONU (SYSCALL TESTİ) ---
+            int syscall_result;
+            __asm__ __volatile__ (
+                "mov $2, %%eax \n\t"          
+                "mov $400, %%ebx \n\t"        
+                "mov $50, %%ecx \n\t"         
+                "mov $120, %%edx \n\t"        
+                "mov $120, %%esi \n\t"        
+                "mov $0x00FF00FF, %%edi \n\t" 
+                "int $0x80 \n\t"              
+                "mov %%eax, %0"               
+                : "=r" (syscall_result)
+                :
+                : "eax", "ebx", "ecx", "edx", "esi", "edi"
+            );
+            
             draw_cursor(mouse_x, mouse_y);
             swap_buffers();
         }
 
         yield(); 
-        __asm__ __volatile__ ("hlt"); 
+        __asm__ __volatile__ ("sti; hlt");
     }
 }

@@ -4,7 +4,8 @@
 // PCB (Process Control Block) - Görev Kontrol Bloğu
 typedef struct task {
     unsigned int esp;      // Görevin kaldığı yer (Stack Pointer)
-    unsigned int id;       // Görev Kimliği (PID)
+    unsigned int id;   
+    unsigned int stack_base;    
     struct task* next;     // Sonraki görev (Dairesel liste için)
 } task_t;
 

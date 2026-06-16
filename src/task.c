@@ -17,10 +17,12 @@ void init_tasking() {
 
 void create_task(void (*func)(void)) {
     task_t* new_task = (task_t*)malloc(sizeof(task_t));
+    
     new_task->id = next_pid++;
     
     // Her yeni görev için 4 KB'lık özel bir yığın (Stack) tahsis et
     unsigned int* stack = (unsigned int*)malloc(4096);
+    new_task->stack_base = (unsigned int)stack;
     unsigned int* stack_top = (unsigned int*)((unsigned int)stack + 4096); // Yığınlar yukarıdan aşağı büyür
     
     // İşlemciyi kandırmak için yığına sahte kayıtlar (Fake Registers) diziyoruz
@@ -44,4 +46,23 @@ void yield() {
     if (prev != current_task) {
         task_switch(&prev->esp, current_task->esp);
     }
+}
+// YENİ: Silinecek görevi tutan Zombie işaretçisi
+// Çekirdek (0) ve Arka plan (1) hariç her görevi acımasızca silen fonksiyon
+void kill_app_task() {
+    task_t* curr = ready_queue;
+    if (curr == 0) return;
+    
+    do {
+        // Eğer görev ID'si 1'den büyükse (yani bu bir harici uygulamaysa)
+        if (curr->next->id > 1) { 
+            task_t* target = curr->next;
+            curr->next = target->next; // Görevi zincirden sonsuza dek kopar!
+            
+            //free((void*)target->stack_base); // Görevin 4KB'lık yığınını iade et
+            //free(target);                    // Görevin kimlik kartını iade et
+            return; // İşi bitir
+        }
+        curr = curr->next;
+    } while (curr != ready_queue);
 }

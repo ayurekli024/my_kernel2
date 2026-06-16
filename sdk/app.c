@@ -1,6 +1,7 @@
 #include "ardaos.h"
 
 void __attribute__((section(".entry"))) _start() {
+    sys_create_window("ArdaOS Yilan Oyunu", 600, 450);
     int snake_x[100];
     int snake_y[100];
     int length = 5;
@@ -16,6 +17,9 @@ void __attribute__((section(".entry"))) _start() {
 
     while(1) {
         char key = sys_get_key();
+        if (key == 'q') {
+            sys_exit();
+        }   
         if(key == 'w' && dir_y == 0) { dir_x = 0; dir_y = -10; }
         if(key == 's' && dir_y == 0) { dir_x = 0; dir_y = 10; }
         if(key == 'a' && dir_x == 0) { dir_x = -10; dir_y = 0; }
@@ -54,7 +58,7 @@ void __attribute__((section(".entry"))) _start() {
 
   // 5. OYUN HIZI (Gecikme)
         // Eğer QEMU'da oyun çok hızlı gelirse bu sayıyı artır, yavaşsa azalt.
-        for(volatile int d = 0; d < 2000000; d++) {}
+        for(volatile int d = 0; d < 20000000; d++) {}
         
         // Arka plandaki işletim sistemine (Saat, Fare) nefes aldır!
         sys_yield(); 

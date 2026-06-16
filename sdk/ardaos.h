@@ -27,5 +27,18 @@ static inline void sys_halt() {
         sys_yield(); 
     }
 }
-
+// YENİ: Çekirdekten dinamik bir pencere talep eder ve ID'sini döner
+static inline int sys_create_window(const char* title, int w, int h) {
+    int win_id;
+    __asm__ __volatile__ (
+        "int $0x80"
+        : "=a"(win_id)
+        : "a"(8), "b"(title), "c"(w), "d"(h)
+    );
+    return win_id;
+}
+// YENİ: Çekirdekten uygulamanın sonlandırılmasını ve RAM'in iade edilmesini ister
+static inline void sys_exit() {
+    __asm__ __volatile__ ("int $0x80" : : "a"(9));
+}
 #endif

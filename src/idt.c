@@ -40,6 +40,8 @@ extern void yield(void);
 extern void api_add_shape(int x, int y, int w, int h, unsigned int color);
 extern char last_game_key;
 extern void api_clear_shapes(void);
+extern int api_create_window(const char* title, int w, int h);
+extern void api_exit_app(void);
 // Yeni Eklenen Dış Bağlantılar
 extern void isr_default_ex(void);
 extern void isr_default_int(void);
@@ -118,7 +120,6 @@ void init_idt(void) {
 // ARDAOS API MERKEZİ (SYSCALL ROUTER)
 // ==========================================
 int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int arg2, unsigned int arg3, unsigned int arg4, unsigned int arg5) {
-    
     // API No 1: Nokta Çiz (put_pixel)
     // Beklenen: arg1=x, arg2=y, arg3=color
     if (sys_num == 1) {
@@ -157,6 +158,16 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
     }
     else if (sys_num == 7) {
         api_clear_shapes();
+        return 1;
+    }
+    // API No 8: Harici Uygulamalar İçin Dinamik Pencere Oluşturucu
+    else if (sys_num == 8) {
+        return api_create_window((const char*)arg1, arg2, arg3);
+    }
+    // YENİ - API No 9: Manuel Çıkış ve RAM İadesi (sys_exit)
+    else if (sys_num == 9) {
+        extern volatile int app_needs_to_die;
+        app_needs_to_die = 1; // Ölüm fermanını imzala
         return 1;
     }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür

@@ -505,7 +505,9 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     init_heap(); init_tasking(); create_task(background_task, 0);
 
     if (vesa_framebuffer != 0) init_graphics(vesa_framebuffer, 1024, 768);
-    init_timer(100); __asm__ __volatile__ ("sti");
+    init_timer(100);
+    init_disk();
+    __asm__ __volatile__ ("sti");
 
     windows[0].id = 0; windows[0].is_open = 1; windows[0].is_dragging = 0;
     windows[0].x = 100; windows[0].y = 100; windows[0].w = 450; windows[0].h = 350;

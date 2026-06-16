@@ -2,146 +2,122 @@
 #include "io.h"
 #include "string.h"
 
-// Diskten Belirli Bir Sektörü (512 Bayt) RAM'e Okur
-void ata_lba_read(unsigned int lba, unsigned char sector_count, unsigned short* target) {
-    // Diskin meşguliyetinin (BSY) bitmesini bekle
-    while ((inb(0x1F7) & 0x80)) {}
+// Dinamik Disk Sınırları
+fat16_bpb_t bpb;
+unsigned int root_dir_start_lba;
+unsigned int data_start_lba;
+
+// ==========================================
+// YENİ: DİSKİ TANIMA VE FAT16 MATEMATİĞİ
+// ==========================================
+void init_disk() {
+    unsigned short boot_sector[256]; // 512 Bayt
     
-    outb(0x1F6, 0xE0 | ((lba >> 24) & 0x0F)); // Master Drive seç ve LBA'nın en üst 4 bitini gönder
-    outb(0x1F2, sector_count);                // Kaç sektör okunacak?
-    outb(0x1F3, (unsigned char)(lba & 0xFF)); // LBA Düşük 8 Bit
-    outb(0x1F4, (unsigned char)((lba >> 8) & 0xFF)); // LBA Orta 8 Bit
-    outb(0x1F5, (unsigned char)((lba >> 16) & 0xFF)); // LBA Yüksek 8 Bit
-    outb(0x1F7, 0x20); // KOMUT: 0x20 = Read Sectors (Okuma İşlemi)
+    // Diskin 0. Sektörünü (Boot Sector) Oku
+    ata_lba_read(0, 1, boot_sector);
     
-    for (int j = 0; j < sector_count; j++) {
-        // Diskin veriyi hazırlamasını (DRQ biti) bekle
-        while (!(inb(0x1F7) & 0x08)) {}
-        
-        // 1 Sektör = 512 Bayt. Biz 16-bit (2 Bayt) okuduğumuz için 256 kere döneceğiz.
-        for (int i = 0; i < 256; i++) {
-            target[i] = inw(0x1F0); // Veri portundan oku ve RAM'e (hedefe) at
-        }
-        target += 256;
+    // Byte-byte kopyalayarak BPB yapımızı doldur
+    unsigned char* byte_ptr = (unsigned char*)boot_sector;
+    for(int i = 0; i < sizeof(fat16_bpb_t); i++) {
+        ((unsigned char*)&bpb)[i] = byte_ptr[i];
     }
+
+    // Haritayı Çıkarıyoruz!
+    unsigned int fat_start = bpb.reserved_sectors;
+    unsigned int fat_size = bpb.fat_count * bpb.sectors_per_fat;
+    
+    // Kök Dizin Nerede Başlıyor? (Eskiden 19 diyorduk, artık sistem kendisi buluyor!)
+    root_dir_start_lba = fat_start + fat_size;
+    
+    // Veriler (Dosya İçerikleri) Nerede Başlıyor?
+    unsigned int root_dir_sectors = (bpb.dir_entries * 32) / 512;
+    data_start_lba = root_dir_start_lba + root_dir_sectors;
 }
 
-// RAM'deki Bir Veriyi Diske (Kalıcı Hafızaya) Yazar
-void ata_lba_write(unsigned int lba, unsigned char sector_count, unsigned short* source) {
+// Diskten Belirli Bir Sektörü Okuma (Donanım Katmanı)
+void ata_lba_read(unsigned int lba, unsigned char sector_count, unsigned short* target) {
     while ((inb(0x1F7) & 0x80)) {}
-    
     outb(0x1F6, 0xE0 | ((lba >> 24) & 0x0F));
     outb(0x1F2, sector_count);
     outb(0x1F3, (unsigned char)(lba & 0xFF));
     outb(0x1F4, (unsigned char)((lba >> 8) & 0xFF));
     outb(0x1F5, (unsigned char)((lba >> 16) & 0xFF));
-    outb(0x1F7, 0x30); // KOMUT: 0x30 = Write Sectors (Yazma İşlemi)
+    outb(0x1F7, 0x20); 
     
     for (int j = 0; j < sector_count; j++) {
         while (!(inb(0x1F7) & 0x08)) {}
         for (int i = 0; i < 256; i++) {
-            outw(0x1F0, source[i]); // RAM'deki veriyi porta (Diske) gönder
+            target[i] = inw(0x1F0);
+        }
+        target += 256;
+    }
+}
+
+void ata_lba_write(unsigned int lba, unsigned char sector_count, unsigned short* source) {
+    while ((inb(0x1F7) & 0x80)) {}
+    outb(0x1F6, 0xE0 | ((lba >> 24) & 0x0F));
+    outb(0x1F2, sector_count);
+    outb(0x1F3, (unsigned char)(lba & 0xFF));
+    outb(0x1F4, (unsigned char)((lba >> 8) & 0xFF));
+    outb(0x1F5, (unsigned char)((lba >> 16) & 0xFF));
+    outb(0x1F7, 0x30); 
+    
+    for (int j = 0; j < sector_count; j++) {
+        while (!(inb(0x1F7) & 0x08)) {}
+        for (int i = 0; i < 256; i++) {
+            outw(0x1F0, source[i]); 
         }
         source += 256;
     }
 }
-// Diskin kök dizininde ismi arar, bulursa hedefe (target) yükler
+
+// Dosyayı FAT16 Kök Dizininden Bul ve Oku
 int ardaos_read_file(const char* filename, const char* ext, unsigned char* target_buffer) {
-    directory_entry_t root_dir[16]; // 1 sektör = 512 bayt / 32 bayt = 16 dosya girişi sığar
+    directory_entry_t root_dir[16]; 
     
-    // Basitlik adına diskin 19. sektörünü KÖK DİZİN (Root Directory) kabul ediyoruz.
-    // İleride buraya gerçek bir FAT tablosu bağlayacağız.
-    ata_lba_read(19, 1, (unsigned short*)root_dir);
+    // YENİ: Artık sabit 19'dan değil, hesaplanan Kök Dizin adresinden okuyoruz
+    ata_lba_read(root_dir_start_lba, 1, (unsigned short*)root_dir);
     
-    // Kök dizindeki 16 yuvayı tek tek tara
     for (int i = 0; i < 16; i++) {
-        if (root_dir[i].name[0] == 0) continue; // Boş yuva, geç
+        if (root_dir[i].name[0] == 0 || root_dir[i].name[0] == (char)0xE5) continue; // Boş veya Silinmiş
         
-        // İsim ve uzantı eşleşiyor mu kontrol et
         if (strncmp(root_dir[i].name, filename, 8) == 0 && strncmp(root_dir[i].ext, ext, 3) == 0) {
             
-            // Dosya bulundu! Başlangıç sektörünü ve kaç sektör kapladığını hesapla
-            unsigned int start_sector = root_dir[i].cluster;
-            // Boyutuna göre kaç sektör okumamız gerektiğini buluyoruz (Her sektör 512 bayt)
+            // YENİ: FAT16 Küme (Cluster) Matematiği!
+            // Verinin fiziksel sektörünü = Veri Başlangıcı + ((Küme - 2) * Küme Başına Sektör)
+            unsigned int actual_lba = data_start_lba + ((root_dir[i].cluster - 2) * bpb.sectors_per_cluster);
             unsigned int sectors_to_read = (root_dir[i].size + 511) / 512;
             
-            // Dosyanın verilerini diskten oku ve RAM'deki hedef tampona yükle!
-            ata_lba_read(start_sector, sectors_to_read, (unsigned short*)target_buffer);
-            return root_dir[i].size; // Başarılıysa dosya boyutunu döndür
+            ata_lba_read(actual_lba, sectors_to_read, (unsigned short*)target_buffer);
+            return root_dir[i].size; 
         }
     }
-    
-    return -1; // Dosya bulunamadı hatası
+    return -1; 
 }
-// Diske yeni bir dosya kaydeder ve kök dizine yazar
-int ardaos_write_file(const char* filename, const char* ext, unsigned int start_sector, unsigned int size, unsigned char* source_buffer) {
-    directory_entry_t root_dir[16];
-    ata_lba_read(19, 1, (unsigned short*)root_dir); // Mevcut kök dizini oku
-    
-    int free_slot = -1;
-    for (int i = 0; i < 16; i++) {
-        if (root_dir[i].name[0] == 0) { // İlk boş yuvayı bul
-            free_slot = i;
-            break;
-        }
-    }
-    
-    if (free_slot == -1) return -1; // Kök dizin dolu!
-    
-    // Yeni dosyanın üst bilgilerini (Metadata) doldur
-    strcpy(root_dir[free_slot].name, filename);
-    strcpy(root_dir[free_slot].ext, ext);
-    root_dir[free_slot].cluster = start_sector;
-    root_dir[free_slot].size = size;
-    root_dir[free_slot].attr = 0x00; // Normal dosya
-    
-    // Önce dosyanın gerçek içeriğini veri alanına yaz
-    unsigned int sectors_to_write = (size + 511) / 512;
-    ata_lba_write(start_sector, sectors_to_write, (unsigned short*)source_buffer);
-    
-    // Sonra güncellenmiş Kök Dizin tablosunu geri diske kilitle!
-    ata_lba_write(19, 1, (unsigned short*)root_dir);
-    return 0; // Başarılı
-}
-// Kök dizindeki (Sektör 19) tüm dosyaları bulur ve metin formatında tampona yazar
+
 void ardaos_list_files(char* output_buffer) {
     directory_entry_t root_dir[16];
+    ata_lba_read(root_dir_start_lba, 1, (unsigned short*)root_dir); // Dinamik adres
     
-    // Diskin kök dizinini RAM'e çek
-    ata_lba_read(19, 1, (unsigned short*)root_dir);
-    
-    strcpy(output_buffer, "=== c.img DISK ICERIGI ===\n");
-    
+    strcpy(output_buffer, "=== FAT16 DISK ICERIGI ===\n");
     int found = 0;
     for (int i = 0; i < 16; i++) {
-        // Eğer dosya adının ilk harfi 0 ise bu slot boştur, atla
-        if (root_dir[i].name[0] != 0) {
-            found++;
+        if (root_dir[i].name[0] != 0 && root_dir[i].name[0] != (char)0xE5) {
             
-            // 8 karakterlik ismi ve 3 karakterlik uzantıyı güvenli metne çevir
-            char temp_name[9];
-            char temp_ext[4];
+            // Gizli (Hidden) veya Birim Etiketi (Volume Label) dosyalarını atla
+            if (root_dir[i].attr == 0x0F || (root_dir[i].attr & 0x08)) continue;
+
+            found++;
+            char temp_name[9]; char temp_ext[4];
             for(int j=0; j<8; j++) temp_name[j] = root_dir[i].name[j];
             for(int j=0; j<3; j++) temp_ext[j] = root_dir[i].ext[j];
-            temp_name[8] = '\0';
-            temp_ext[3] = '\0';
+            temp_name[8] = '\0'; temp_ext[3] = '\0';
             
-            // Dosya boyutunu metne (string) çevir
-            char size_str[16];
-            itoa(root_dir[i].size, size_str);
-            
-            // Format: "- TESTAPP .BIN  (152 Bayt)\n"
-            strcat(output_buffer, "- ");
-            strcat(output_buffer, temp_name);
-            strcat(output_buffer, ".");
-            strcat(output_buffer, temp_ext);
-            strcat(output_buffer, "   (");
-            strcat(output_buffer, size_str);
-            strcat(output_buffer, " Bayt)\n");
+            char size_str[16]; itoa(root_dir[i].size, size_str);
+            strcat(output_buffer, "- "); strcat(output_buffer, temp_name);
+            strcat(output_buffer, "."); strcat(output_buffer, temp_ext);
+            strcat(output_buffer, "   ("); strcat(output_buffer, size_str); strcat(output_buffer, " Bayt)\n");
         }
     }
-    
-    if (found == 0) {
-        strcat(output_buffer, "Disk tamamen bos.");
-    }
+    if (found == 0) strcat(output_buffer, "Disk tamamen bos.");
 }

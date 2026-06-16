@@ -1,25 +1,40 @@
 #ifndef DISK_H
 #define DISK_H
 
-// YENİ: FAT Mimarisine Uygun Dosya Giriş Yapısı (32 Bayt)
+// YENİ: FAT16 Boot Sektör Haritası (BPB - BIOS Parameter Block)
 typedef struct {
-    char name[8];          // Dosya adı (Örn: "SNAKE   ")
-    char ext[3];           // Uzantısı (Örn: "BIN")
-    unsigned char attr;    // Dosya niteliği (Klasör mü, gizli mi?)
+    unsigned char jump[3];
+    char oem[8];
+    unsigned short bytes_per_sector;
+    unsigned char sectors_per_cluster;
+    unsigned short reserved_sectors;
+    unsigned char fat_count;
+    unsigned short dir_entries;       // Kök dizindeki maksimum dosya sayısı
+    unsigned short total_sectors;
+    unsigned char media_descriptor;
+    unsigned short sectors_per_fat;   // Bir FAT tablosunun boyutu
+    unsigned short sectors_per_track;
+    unsigned short heads;
+    unsigned int hidden_sectors;
+    unsigned int large_sectors;
+} __attribute__((packed)) fat16_bpb_t;
+
+// FAT Mimarisine Uygun Dosya Giriş Yapısı (32 Bayt)
+typedef struct {
+    char name[8];          
+    char ext[3];           
+    unsigned char attr;    
     unsigned char reserved[10];
-    unsigned short time;   // Oluşturulma saati
-    unsigned short date;   // Oluşturulma tarihi
-    unsigned short cluster;// Dosyanın başladığı ilk sektör/küme numarası
-    unsigned int size;     // Bayt cinsinden dosya boyutu
+    unsigned short time;   
+    unsigned short date;   
+    unsigned short cluster; // Dosyanın başladığı ilk KÜME (Cluster)
+    unsigned int size;     
 } __attribute__((packed)) directory_entry_t;
 
-// Temel Sektör Okuma/Yazma Fonksiyonları
+void init_disk(void); // YENİ: Diski analiz eden fonksiyon
 void ata_lba_read(unsigned int lba, unsigned char sector_count, unsigned short* target);
 void ata_lba_write(unsigned int lba, unsigned char sector_count, unsigned short* source);
-
-// Gelişmiş Dosya Okuma/Yazma Fonksiyonları
 int ardaos_read_file(const char* filename, const char* ext, unsigned char* target_buffer);
-int ardaos_write_file(const char* filename, const char* ext, unsigned int start_sector, unsigned int size, unsigned char* source_buffer);
-
 void ardaos_list_files(char* output_buffer);
+
 #endif

@@ -18,32 +18,45 @@ extern unsigned char inb(unsigned short port);
 // ==========================================
 // 1. GLOBAL DEĞİŞKENLER VE DURUM YÖNETİMİ
 // ==========================================
-#define MAX_SHAPES 200
-#define MAX_WINDOWS 4
-int shape_count = 0;
-int shape_x[MAX_SHAPES]; int shape_y[MAX_SHAPES];
-int shape_w[MAX_SHAPES]; int shape_h[MAX_SHAPES];
-unsigned int shape_color[MAX_SHAPES];
+#define MAX_DESKTOP_SHAPES 50
+#define MAX_WINDOWS 6 // Limit 6'ya çıkarıldı
+#define MAX_SHAPES_PER_WIN 100 // Her pencerenin özel tuval limiti
 
+// Masaüstü Şekilleri (Terminalden "ciz" komutu ile çizilenler)
+int desktop_shape_count = 0;
+int desktop_shape_x[MAX_DESKTOP_SHAPES]; int desktop_shape_y[MAX_DESKTOP_SHAPES];
+int desktop_shape_w[MAX_DESKTOP_SHAPES]; int desktop_shape_h[MAX_DESKTOP_SHAPES];
+unsigned int desktop_shape_color[MAX_DESKTOP_SHAPES];
+
+// Kapsüllü (OOP) Pencere Mimarisi
 typedef struct {
     int id;
     int x, y, w, h;
     int is_open;
     int is_dragging;
     char title[32];
+    int owner_task_id; // Bu pencere hangi göreve (Task) ait?
+    
+    // Her pencerenin kendine ait bağımsız grafik hafızası
+    int shape_count;
+    int shape_x[MAX_SHAPES_PER_WIN]; int shape_y[MAX_SHAPES_PER_WIN];
+    int shape_w[MAX_SHAPES_PER_WIN]; int shape_h[MAX_SHAPES_PER_WIN];
+    unsigned int shape_color[MAX_SHAPES_PER_WIN];
 } window_t;
+
 window_t windows[MAX_WINDOWS];
 
 int focused_window = 0; 
 int any_window_dragging = 0;
 volatile int force_redraw = 0;
 char last_game_key = 0;
-int app_window_id = -1;
-unsigned int current_app_base = 0;
+
+volatile int app_needs_to_die = 0; 
+int task_to_kill = -1; // Cellat motorunun hedefini tutar
 
 int last_mouse_x = 0, last_mouse_y = 0;
 unsigned int current_bg_color = 0x001B26;
-char terminal_response[512] = "ArdaOS V0.2'ye Hos Geldiniz!";
+char terminal_response[512] = "ArdaOS V0.3 Multitasking'e Hos Geldiniz!";
 char user_input[256] = "Arda> "; 
 int input_idx = 6; 
 unsigned int system_ticks = 0;
@@ -53,30 +66,33 @@ int last_second = -1;
 char cmd_history[MAX_HISTORY][256];
 int history_count = 0; 
 int history_index = 0;
-
 int task1_counter = 0;
 
 // ==========================================
 // 2. YARDIMCI FONKSİYONLAR VE API'LER
 // ==========================================
 unsigned char get_rtc_register(int reg) {
-    outb(0x70, reg);
-    return inb(0x71);
+    outb(0x70, reg); return inb(0x71);
 }
 
 unsigned char bcd_to_bin(unsigned char bcd) {
     return (bcd & 0x0F) + ((bcd >> 4) * 10);
 }
 
+// MULTITASKING API: Pencereyi açan Task'ı sahiplendirir
 int api_create_window(const char* title, int w, int h) {
+    unsigned int active_app_base = current_task->app_base;
     const char* real_title = title;
+    
     if ((unsigned int)title < 0x100000) {
-        real_title = (const char*)(current_app_base + (unsigned int)title);
+        real_title = (const char*)(active_app_base + (unsigned int)title);
     }
 
     for (int i = 0; i < MAX_WINDOWS; i++) {
         if (!windows[i].is_open) {
             windows[i].id = i;
+            windows[i].owner_task_id = current_task->id; 
+            windows[i].shape_count = 0;                  
             windows[i].x = 200 + (i * 20); 
             windows[i].y = 120 + (i * 20);
             windows[i].w = w; windows[i].h = h;
@@ -90,7 +106,6 @@ int api_create_window(const char* title, int w, int h) {
             windows[i].title[j] = '\0';
             
             focused_window = i;  
-            app_window_id = i;   
             force_redraw = 1;
             return i;            
         }
@@ -98,31 +113,58 @@ int api_create_window(const char* title, int w, int h) {
     return -1; 
 }
 
+// MULTITASKING API: Şekilleri evrensel listeye değil, Task'a ait olan pencerenin tuvaline çizer!
 void api_add_shape(int x, int y, int w, int h, unsigned int color) {
-    if (shape_count < MAX_SHAPES) {
-        shape_x[shape_count] = x; shape_y[shape_count] = y;
-        shape_w[shape_count] = w; shape_h[shape_count] = h;
-        shape_color[shape_count] = color;
-        shape_count++;
+    for (int i = 2; i < MAX_WINDOWS; i++) {
+        if (windows[i].is_open && windows[i].owner_task_id == current_task->id) {
+            if (windows[i].shape_count < MAX_SHAPES_PER_WIN) {
+                int s = windows[i].shape_count;
+                windows[i].shape_x[s] = x; windows[i].shape_y[s] = y;
+                windows[i].shape_w[s] = w; windows[i].shape_h[s] = h;
+                windows[i].shape_color[s] = color;
+                windows[i].shape_count++;
+                force_redraw = 1;
+            }
+            return;
+        }
     }
-    force_redraw = 1;
 }
 
 void api_clear_shapes() {
-    shape_count = 0;
-    force_redraw = 1;
+    for (int i = 2; i < MAX_WINDOWS; i++) {
+        if (windows[i].is_open && windows[i].owner_task_id == current_task->id) {
+            windows[i].shape_count = 0;
+            force_redraw = 1;
+            return;
+        }
+    }
+}
+// MULTITASKING API: Sadece odaklanmış pencerenin sahibi klavyeyi okuyabilir!
+int api_get_key() {
+    // 1. Önce aktif odaklanmış bir harici pencere (ID >= 2) var mı kontrol et
+    if (focused_window >= 2 && windows[focused_window].is_open) {
+        
+        // 2. Bu API'yi çağıran Görev (Task), aktif pencerenin SAHİBİ mi?
+        if (windows[focused_window].owner_task_id == current_task->id) {
+            char k = last_game_key;
+            last_game_key = 0; // Tuşu sahibine teslim ettik, tamponu temizle
+            return k;
+        }
+    }
+    
+    // Eğer pencere aktif değilse veya API'yi çağıran Task o pencerenin sahibi değilse
+    return 0; // "Tuşa basılmadı" yalanını söyleyerek diğerlerini dondur!
 }
 
-volatile int app_needs_to_die = 0;
-extern void kill_app_task(void);
-unsigned int zombie_app_base = 0;
+// SYSCALL (API No 9) Tetiklendiğinde
+void api_exit_app() {
+    task_to_kill = current_task->id;
+}
+
+extern void kill_task_by_id(int task_id);
 
 void background_task() {
-    while(1) {
-        __asm__ __volatile__("sti");
-        task1_counter++; 
-        yield();         
-    }
+    while(1) { __asm__ __volatile__("sti"); task1_counter++; yield(); }
 }
 
 // ==========================================
@@ -147,6 +189,10 @@ void render_gui() {
     force_redraw = 0;
     
     draw_desktop(current_bg_color); 
+    
+    for (int s = 0; s < desktop_shape_count; s++) {
+        draw_rect(desktop_shape_x[s], desktop_shape_y[s], desktop_shape_w[s], desktop_shape_h[s], desktop_shape_color[s]);
+    }
     
     int draw_order[MAX_WINDOWS];
     int order_idx = 0;
@@ -173,14 +219,17 @@ void render_gui() {
             strcat(info_text, " Saniye\n\nBellek Durumu: OK\nMultitasking: Aktif");
             draw_string_wrapped(windows[1].x + 10, windows[1].y + 50, windows[1].w - 20, info_text, 0x00000000, 0xFFFFFFFF);
         }
-        else if (app_window_id != -1 && w_idx == app_window_id) {
+        else if (w_idx >= 2) {
             draw_rect(windows[w_idx].x + 2, windows[w_idx].y + 32, windows[w_idx].w - 4, windows[w_idx].h - 34, 0x00000000);
-            for (int s = 0; s < shape_count; s++) {
-                draw_rect(windows[w_idx].x + shape_x[s], windows[w_idx].y + 32 + shape_y[s], shape_w[s], shape_h[s], shape_color[s]);
+            for (int s = 0; s < windows[w_idx].shape_count; s++) {
+                draw_rect(windows[w_idx].x + windows[w_idx].shape_x[s], 
+                          windows[w_idx].y + 32 + windows[w_idx].shape_y[s], 
+                          windows[w_idx].shape_w[s], 
+                          windows[w_idx].shape_h[s], 
+                          windows[w_idx].shape_color[s]);
             }
         }
     }
-    
     draw_cursor(mouse_x, mouse_y);
     swap_buffers();
 }
@@ -196,7 +245,7 @@ void execute_command(char* cmd) {
     }
 
     if (strcmp(cmd, "info") == 0) {
-        strcpy(terminal_response, "Sistem: ArdaOS V0.2\nMimari: 32-bit x86\nCekirdek Durumu: Kararli\nGUI: Moduler");
+        strcpy(terminal_response, "Sistem: ArdaOS V0.3\nMimari: 32-bit x86\nOzel: Gercek Multitasking");
     } 
     else if (strcmp(cmd, "temizle") == 0) {
         strcpy(terminal_response, ""); 
@@ -206,10 +255,9 @@ void execute_command(char* cmd) {
         if (app_memory != 0) {
             int file_size = ardaos_read_file("TESTAPP ", "BIN", app_memory);
             if (file_size > 0) {
-                current_app_base = (unsigned int)app_memory;
                 void (*app_entry)() = (void (*)())app_memory;
-                create_task(app_entry);
-                strcpy(terminal_response, "[ BASARILI ] Uygulama yuklendi. Kendi penceresini acacak...");
+                create_task(app_entry, (unsigned int)app_memory);
+                strcpy(terminal_response, "[ BASARILI ] Yeni bagimsiz surec (Task) baslatildi!");
             } else {
                 free(app_memory);
                 strcpy(terminal_response, "Hata: TESTAPP.BIN bulunamadi.");
@@ -227,7 +275,7 @@ void execute_command(char* cmd) {
         strcpy(terminal_response, "Masaustu rengi kirmizi olarak degistirildi.");
     } 
     else if (strcmp(cmd, "help") == 0) {
-        strcpy(terminal_response, "KOMUTLAR:\n- help: Bu listeyi gosterir\n- info: Sistem detayi\n- temizle: Ekrani siler\n- renk [mavi/kirmizi]: Arkaplan\n- memorytest: RAM saglik testi\n- uptime: Calisma olay sayaci");
+        strcpy(terminal_response, "KOMUTLAR:\n- help: Bu liste\n- info: Sistem detayi\n- temizle: Ekrani siler\n- renk [mavi/kirmizi]\n- memorytest: RAM saglik testi\n- uptime: Calisma suresi\n- saat: Donanim saati\n- yanki [mesaj]\n- hesapla [a + b]\n- ciz dikdortgen <x> <y> <w> <h> <renk>");
     }
     else if (strcmp(cmd, "ls") == 0 || strcmp(cmd, "dir") == 0) {
         ardaos_list_files(terminal_response);
@@ -236,9 +284,9 @@ void execute_command(char* cmd) {
         void* test_ptr = malloc(1024); 
         if (test_ptr != 0) {
             free(test_ptr); 
-            strcpy(terminal_response, "[ BASARILI ]\n1 KB Heap bellegi sorunsuz ayrildi ve iade edildi.");
+            strcpy(terminal_response, "[ BASARILI ] 1 KB Heap bellegi iade edildi.");
         } else {
-            strcpy(terminal_response, "[ DIKKAT - BASARISIZ ]\nHeap uzerinde yeterli bellek kalmadi.");
+            strcpy(terminal_response, "[ HATA ] Yetersiz Heap bellegi.");
         }
     }
     else if (strcmp(cmd, "uptime") == 0) {
@@ -255,7 +303,7 @@ void execute_command(char* cmd) {
         h = (h + 3) % 24;
         char hs[10], ms[10], ss[10];
         itoa(h, hs); itoa(m, ms); itoa(s, ss);
-        strcpy(terminal_response, "Gercek Donanim Saati (CMOS UTC+3): ");
+        strcpy(terminal_response, "Gercek Donanim Saati: ");
         strcat(terminal_response, hs); strcat(terminal_response, ":");
         strcat(terminal_response, ms); strcat(terminal_response, ":");
         strcat(terminal_response, ss);
@@ -284,7 +332,7 @@ void execute_command(char* cmd) {
             else result = num1 / num2;
         } else {
             valid = 0;
-            strcpy(terminal_response, "Gecersiz islem! Ornek kullanim: hesapla 25 + 14");
+            strcpy(terminal_response, "Gecersiz islem! Ornek: hesapla 25 + 14");
         }
 
         if (valid) {
@@ -297,27 +345,19 @@ void execute_command(char* cmd) {
     else if (strncmp(cmd, "ciz ", 4) == 0) {
         char* args = cmd + 4; 
         if (strncmp(args, "temizle", 7) == 0) {
-            shape_count = 0; 
+            desktop_shape_count = 0; 
             strcpy(terminal_response, "Masaustu tuvali temizlendi!");
         }
         else if (strncmp(args, "dikdortgen ", 11) == 0) {
-            if (shape_count < MAX_SHAPES) {
+            if (desktop_shape_count < MAX_DESKTOP_SHAPES) {
                 int i = 11;
-                while(args[i] == ' ') i++; 
-                int x = atoi(&args[i]);
-                
+                while(args[i] == ' ') i++; int x = atoi(&args[i]);
                 while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
-                while(args[i] == ' ') i++; 
-                int y = atoi(&args[i]);
-                
+                while(args[i] == ' ') i++; int y = atoi(&args[i]);
                 while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
-                while(args[i] == ' ') i++; 
-                int w = atoi(&args[i]);
-                
+                while(args[i] == ' ') i++; int w = atoi(&args[i]);
                 while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
-                while(args[i] == ' ') i++; 
-                int h = atoi(&args[i]);
-                
+                while(args[i] == ' ') i++; int h = atoi(&args[i]);
                 while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
                 while(args[i] == ' ') i++;
                 
@@ -327,17 +367,12 @@ void execute_command(char* cmd) {
                 else if (strncmp(&args[i], "mavi", 4) == 0) c = 0x000078D7;
                 else if (strncmp(&args[i], "sari", 4) == 0) c = 0x00FFCC00;
 
-                shape_x[shape_count] = x; shape_y[shape_count] = y;
-                shape_w[shape_count] = w; shape_h[shape_count] = h;
-                shape_color[shape_count] = c; shape_count++;
-                strcpy(terminal_response, "Sekil basariyla Ekran Listesine eklendi!");
-            } else {
-                strcpy(terminal_response, "Hata: Ekranda maksimum sekil sayisina ulasildi!");
+                desktop_shape_x[desktop_shape_count] = x; desktop_shape_y[desktop_shape_count] = y;
+                desktop_shape_w[desktop_shape_count] = w; desktop_shape_h[desktop_shape_count] = h;
+                desktop_shape_color[desktop_shape_count] = c; desktop_shape_count++;
+                strcpy(terminal_response, "Masaustu Sekli Eklendi!");
             }
         } 
-        else {
-            strcpy(terminal_response, "Hata: 'ciz dikdortgen <x> <y> <w> <h> <renk>' kullanin.");
-        }
     }
     else if (strcmp(cmd, "") == 0) { } 
     else {
@@ -351,16 +386,20 @@ void execute_command(char* cmd) {
 void process_keyboard_events() {
     char kbd_char = get_keyboard_char();
     if (kbd_char != 0) {
-        last_game_key = kbd_char;
         force_redraw = 1;
-        if (!(app_window_id != -1 && windows[app_window_id].is_open && focused_window == app_window_id)) {
+        
+        if (focused_window >= 2 && windows[focused_window].is_open) {
+            last_game_key = kbd_char;
+        } else {
+            last_game_key = 0; 
+            
             if (kbd_char == '\n') { 
                 char* cmd = &user_input[6]; 
                 execute_command(cmd);
                 strcpy(user_input, "Arda> ");
                 input_idx = 6;
             } 
-            else if (kbd_char == 17) { 
+            else if (kbd_char == 17) { // GEÇMİŞ KOMUT: YUKARI OK 
                 if (history_count > 0 && history_index > 0) {
                     history_index--;
                     strcpy(user_input, "Arda> ");
@@ -368,7 +407,7 @@ void process_keyboard_events() {
                     input_idx = 6 + strlen(cmd_history[history_index % MAX_HISTORY]);
                 }
             }
-            else if (kbd_char == 18) { 
+            else if (kbd_char == 18) { // GEÇMİŞ KOMUT: AŞAĞI OK 
                 if (history_index < history_count) {
                     history_index++;
                     if (history_index == history_count) {
@@ -426,7 +465,15 @@ void process_mouse_events() {
                     if (mouse_x >= windows[focused_window].x + windows[focused_window].w - 30 &&
                         mouse_x <= windows[focused_window].x + windows[focused_window].w &&
                         mouse_y >= windows[focused_window].y && mouse_y <= windows[focused_window].y + 30) {
-                        windows[focused_window].is_open = 0; 
+                        
+                        // KIRMIZI X BUTONU MANTIĞI:
+                        if (focused_window >= 2) {
+                            // Harici uygulamaysa görevi cellada devret
+                            task_to_kill = windows[focused_window].owner_task_id;
+                        } else {
+                            // Terminal (0) veya Monitor (1) ise sadece pencereyi gizle
+                            windows[focused_window].is_open = 0;
+                        }
                     }
                     else if (mouse_y >= windows[focused_window].y && mouse_y <= windows[focused_window].y + 30) {
                         windows[focused_window].is_dragging = 1;
@@ -451,28 +498,14 @@ void process_mouse_events() {
 // 7. ANA İŞLETİM SİSTEMİ BAŞLANGICI (KERNEL ENTRY)
 // ==========================================
 void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
-    init_gdt();
-    pic_remap();     
-    init_idt();      
-    init_mouse(); 
-
+    init_gdt(); pic_remap(); init_idt(); init_mouse(); 
     if (magic != 0x2BADB002) return; 
-
-    if (mb_info->flags & (1 << 12)) { 
-        vesa_framebuffer = (unsigned int*)(unsigned int)mb_info->framebuffer_addr;
-    }
-    
+    if (mb_info->flags & (1 << 12)) vesa_framebuffer = (unsigned int*)(unsigned int)mb_info->framebuffer_addr;
     init_paging((unsigned int)vesa_framebuffer); 
-    init_heap();
-    init_tasking();               
-    create_task(background_task);
+    init_heap(); init_tasking(); create_task(background_task, 0);
 
-    if (vesa_framebuffer != 0) {
-        init_graphics(vesa_framebuffer, 1024, 768);
-    }
-
-    init_timer(100);
-    __asm__ __volatile__ ("sti");
+    if (vesa_framebuffer != 0) init_graphics(vesa_framebuffer, 1024, 768);
+    init_timer(100); __asm__ __volatile__ ("sti");
 
     windows[0].id = 0; windows[0].is_open = 1; windows[0].is_dragging = 0;
     windows[0].x = 100; windows[0].y = 100; windows[0].w = 450; windows[0].h = 350;
@@ -482,51 +515,38 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     windows[1].x = 600; windows[1].y = 150; windows[1].w = 300; windows[1].h = 200;
     strcpy(windows[1].title, "Sistem Monitoru");
 
-    focused_window = 0;
-
-    // Diski Test Et ve Sonucu Terminale Yaz
-    char write_buffer[512] = "Merhaba Arda! Bu yazi tamamen RAM disindan, fiziksel Hard Diskten okunmustur!";
-    ata_lba_write(5, 1, (unsigned short*)write_buffer);
-
-    char read_buffer[512];
-    for(int i=0; i<512; i++) read_buffer[i] = 0; 
-    ata_lba_read(5, 1, (unsigned short*)read_buffer);
-
-    strcpy(terminal_response, "ArdaOS Disk Testi Sonucu:\n[ ");
-    strcat(terminal_response, read_buffer);
-    strcat(terminal_response, " ]\n\n- info\n- temizle\n- hesapla");
-
-    last_mouse_x = mouse_x; last_mouse_y = mouse_y;
+    focused_window = 0; last_mouse_x = mouse_x; last_mouse_y = mouse_y;
 
     // ==========================================
-    // SADECE 13 SATIRLIK KUSURSUZ ANA DÖNGÜ!
+    // MULTITASKING ANA DÖNGÜSÜ
     // ==========================================
     while(1) {
         system_ticks++;
-        if (app_needs_to_die || (app_window_id != -1 && windows[app_window_id].is_open == 0)) {
-
-            kill_app_task(); // Görevi listeden tamamen kopar ve 4KB yığınını iade et
-
-            //if (current_app_base != 0) {
-            //   free((void*)current_app_base); // Uygulamanın 4KB kod belleğini iade et
-            //   
-            //}
-            current_app_base = 0;
-            if (app_window_id != -1) {
-                windows[app_window_id].is_open = 0;
-                app_window_id = -1;
-            }
-
-            shape_count = 0;
-            focused_window = 0; // Odağı güvenlice terminale geri ver
-            force_redraw = 1;
+        
+        // API 9'dan (Q tuşu sys_exit) gelen ölüm fermanı
+        if (app_needs_to_die) {
+            task_to_kill = current_task->id;
             app_needs_to_die = 0;
-            strcpy(terminal_response, "[ SISTEM ] Uygulama basariyla kapatildi ve RAM temizlendi.");
         }
+
+        // KUSURSUZ CELLAT MOTORU: Hedeflenen ID'yi temizle
+        if (task_to_kill != -1) {
+            kill_task_by_id(task_to_kill); 
+            
+            for (int i = 2; i < MAX_WINDOWS; i++) {
+                if (windows[i].is_open && windows[i].owner_task_id == task_to_kill) {
+                    windows[i].is_open = 0;
+                    if (focused_window == i) focused_window = 0;
+                }
+            }
+            task_to_kill = -1;
+            force_redraw = 1;
+            strcpy(terminal_response, "[ SISTEM ] Uygulama sonlandirildi.");
+        }
+
         int current_second = timer_ticks / 100;
         if (current_second != last_second) {
-            last_second = current_second;
-            force_redraw = 1; 
+            last_second = current_second; force_redraw = 1; 
         }
 
         process_mouse_events();

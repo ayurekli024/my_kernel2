@@ -41,6 +41,7 @@ extern void api_add_shape(int x, int y, int w, int h, unsigned int color);
 extern char last_game_key;
 extern void api_clear_shapes(void);
 extern int api_create_window(const char* title, int w, int h);
+extern int api_get_key(void);
 extern void api_exit_app(void);
 // Yeni Eklenen Dış Bağlantılar
 extern void isr_default_ex(void);
@@ -152,9 +153,7 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
     }
      
     else if (sys_num == 6) {
-        char key = last_game_key;
-        last_game_key = 0; // Bir kere okuyunca sıfırla ki yılan sürekli aynı yöne gitmesin
-        return key;
+        return api_get_key();
     }
     else if (sys_num == 7) {
         api_clear_shapes();

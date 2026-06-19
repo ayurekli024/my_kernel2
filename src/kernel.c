@@ -155,10 +155,40 @@ int api_get_key() {
     // Eğer pencere aktif değilse veya API'yi çağıran Task o pencerenin sahibi değilse
     return 0; // "Tuşa basılmadı" yalanını söyleyerek diğerlerini dondur!
 }
+// MULTITASKING API: Harici uygulamanın güvenli şekilde dosya yazması
+int api_write_file(const char* name, const char* ext, unsigned char* buffer) {
+    unsigned int base = current_task->app_base;
+    const char* real_name = (unsigned int)name < 0x100000 ? (const char*)(base + (unsigned int)name) : name;
+    const char* real_ext = (unsigned int)ext < 0x100000 ? (const char*)(base + (unsigned int)ext) : ext;
+    unsigned char* real_buffer = (unsigned int)buffer < 0x100000 ? (unsigned char*)(base + (unsigned int)buffer) : buffer;
+    
+    // KESİN ZIRH: Uygulamadan boyut bekleme, donanım standardı olan 512'yi (1 Sektör) zorla!
+    return ardaos_write_file(real_name, real_ext, 512, real_buffer);
+}
 
-// SYSCALL (API No 9) Tetiklendiğinde
+// MULTITASKING API: Harici uygulamanın güvenli şekilde dosya okuması
+int api_read_file(const char* name, const char* ext, unsigned char* buffer) {
+    unsigned int base = current_task->app_base;
+    const char* real_name = (unsigned int)name < 0x100000 ? (const char*)(base + (unsigned int)name) : name;
+    const char* real_ext = (unsigned int)ext < 0x100000 ? (const char*)(base + (unsigned int)ext) : ext;
+    unsigned char* real_buffer = (unsigned int)buffer < 0x100000 ? (unsigned char*)(base + (unsigned int)buffer) : buffer;
+    return ardaos_read_file(real_name, real_ext, real_buffer);
+}
+// MULTITASKING API: Uygulamalarin Terminale Mesaj Gondermesi
+void api_print(const char* text) {
+    unsigned int base = current_task->app_base;
+    const char* real_text = (unsigned int)text < 0x100000 ? (const char*)(base + (unsigned int)text) : text;
+    
+    strcpy(terminal_response, real_text); // Terminal metnini güncelle
+    force_redraw = 1;                     // Ekranın yenilenmesini sağla
+}
+// SYSCALL (API No 9) Tetiklendiğinde çalışır
 void api_exit_app() {
-    task_to_kill = current_task->id;
+    task_to_kill = current_task->id; // Hedefi (kendini) belirle
+    
+    // YENİ: Uygulamaya geri dönme! İşlemciyi (CPU) anında sıradaki göreve devret!
+    extern void yield(void);
+    yield(); 
 }
 
 extern void kill_task_by_id(int task_id);
@@ -250,20 +280,54 @@ void execute_command(char* cmd) {
     else if (strcmp(cmd, "temizle") == 0) {
         strcpy(terminal_response, ""); 
     } 
-    else if (strcmp(cmd, "testapp") == 0) {
+    // ========================================================
+    // DİNAMİK UYGULAMA YÜKLEYİCİ (DYNAMIC EXECUTION ENGINE)
+    // ========================================================
+    // Eğer girilen komutun sonu ".bin" veya ".BIN" ile bitiyorsa
+    else if (strlen(cmd) > 4 && 
+            (strcmp(cmd + strlen(cmd) - 4, ".bin") == 0 || 
+             strcmp(cmd + strlen(cmd) - 4, ".BIN") == 0)) {
+        
+        // 1. Dosya adını ve uzantısını FAT16 standardına (8+3) göre ayır
+        char raw_name[16];
+        strcpy(raw_name, cmd);
+        raw_name[strlen(cmd) - 4] = '\0'; // Uzantıyı kes (Örn: "TESTAPP")
+        
+        // FAT16 için ismi 8 karaktere tamamlayıp boşlukla doldurmamız gerekir (Örn: "TESTAPP ")
+        char fat_name[9] = "        "; 
+        for(int i = 0; i < 8 && raw_name[i] != '\0'; i++) {
+            fat_name[i] = raw_name[i];
+            // Harfleri büyük harfe çevir (FAT16 standart olarak büyük harf saklar)
+            if(fat_name[i] >= 'a' && fat_name[i] <= 'z') {
+                fat_name[i] = fat_name[i] - 32;
+            }
+        }
+        fat_name[8] = '\0';
+
+        // 2. RAM'den 4 KB'lık temiz bir yer ayır
         unsigned char* app_memory = (unsigned char*)malloc(4096); 
         if (app_memory != 0) {
-            int file_size = ardaos_read_file("TESTAPP ", "BIN", app_memory);
+            
+            // 3. Dosyayı dinamik olarak diskten oku
+            int file_size = ardaos_read_file(fat_name, "BIN", app_memory);
+            
             if (file_size > 0) {
                 void (*app_entry)() = (void (*)())app_memory;
+                
+                // 4. Yeni görev (Task) olarak süreç tablosuna ekle!
                 create_task(app_entry, (unsigned int)app_memory);
-                strcpy(terminal_response, "[ BASARILI ] Yeni bagimsiz surec (Task) baslatildi!");
+                
+                strcpy(terminal_response, "[ SISTEM ] ");
+                strcat(terminal_response, raw_name);
+                strcat(terminal_response, " basariyla yüklendi ve baslatildi!");
             } else {
-                free(app_memory);
-                strcpy(terminal_response, "Hata: TESTAPP.BIN bulunamadi.");
+                free(app_memory); // Bulunamadıysa RAM'i hemen iade et
+                strcpy(terminal_response, "Hata: ");
+                strcat(terminal_response, cmd);
+                strcat(terminal_response, " dosyasi diskte bulunamadi.");
             }
         } else {
-            strcpy(terminal_response, "Hata: Yetersiz RAM!");
+            strcpy(terminal_response, "Hata: Uygulama baslatmak icin yetersiz RAM!");
         }
     }
     else if (strcmp(cmd, "renk mavi") == 0) {

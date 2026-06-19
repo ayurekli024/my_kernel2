@@ -42,6 +42,8 @@ extern char last_game_key;
 extern void api_clear_shapes(void);
 extern int api_create_window(const char* title, int w, int h);
 extern int api_get_key(void);
+extern int api_write_file(const char*, const char*, unsigned char*);
+extern int api_read_file(const char*, const char*, unsigned char*);
 extern void api_exit_app(void);
 // Yeni Eklenen Dış Bağlantılar
 extern void isr_default_ex(void);
@@ -164,9 +166,24 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         return api_create_window((const char*)arg1, arg2, arg3);
     }
     // YENİ - API No 9: Manuel Çıkış ve RAM İadesi (sys_exit)
+    // API No 9: Manuel Çıkış ve Zombi İşaretleme (sys_exit)
     else if (sys_num == 9) {
-        extern volatile int app_needs_to_die;
-        app_needs_to_die = 1; // Ölüm fermanını imzala
+        extern void api_exit_app(void);
+        api_exit_app(); // Çekirdeğe git ve CPU'yu devret
+        return 1;
+    }
+    // API No 10: Dosya Yazma
+    else if (sys_num == 10) {
+        return api_write_file((const char*)arg1, (const char*)arg2, (unsigned char*)arg3);
+    }
+    // API No 11: Dosya Okuma
+    else if (sys_num == 11) {
+        return api_read_file((const char*)arg1, (const char*)arg2, (unsigned char*)arg3);
+    }
+    // API No 12: Terminale Mesaj Yazdirma (sys_print)
+    else if (sys_num == 12) {
+        extern void api_print(const char*);
+        api_print((const char*)arg1);
         return 1;
     }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür

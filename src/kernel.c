@@ -56,9 +56,15 @@ int task_to_kill = -1; // Cellat motorunun hedefini tutar
 
 int last_mouse_x = 0, last_mouse_y = 0;
 unsigned int current_bg_color = 0x001B26;
-char terminal_response[512] = "ArdaOS V0.3 Multitasking'e Hos Geldiniz!";
+// YENİ: TERMINAL SCROLLING MOTORU
+#define TERMINAL_MAX_LINES 16
+#define TERMINAL_LINE_LEN 80
+char terminal_lines[TERMINAL_MAX_LINES][TERMINAL_LINE_LEN];
+int terminal_line_count = 0;
+
+char terminal_response[1024] = ""; // execute_command için geçici tampon
 char user_input[256] = "Arda> "; 
-int input_idx = 6; 
+int input_idx = 6;
 unsigned int system_ticks = 0;
 int last_second = -1;
 
@@ -174,13 +180,54 @@ int api_read_file(const char* name, const char* ext, unsigned char* buffer) {
     unsigned char* real_buffer = (unsigned int)buffer < 0x100000 ? (unsigned char*)(base + (unsigned int)buffer) : buffer;
     return ardaos_read_file(real_name, real_ext, real_buffer);
 }
+// TERMINAL YAZDIRMA VE KAYDIRMA (SCROLLING) MOTORU
+void terminal_print(const char* text) {
+    int i = 0;
+    char temp_line[TERMINAL_LINE_LEN];
+    int t_idx = 0;
+    
+    while(text[i] != '\0') {
+        // Eğer alt satıra geçiş (\n) geldiyse veya satır sonuna ulaşıldıysa
+        if (text[i] == '\n' || t_idx >= TERMINAL_LINE_LEN - 1) {
+            temp_line[t_idx] = '\0';
+            
+            // Ekran doluysa tüm satırları 1 blok yukarı kaydır!
+            if (terminal_line_count >= TERMINAL_MAX_LINES) {
+                for (int j = 1; j < TERMINAL_MAX_LINES; j++) {
+                    strcpy(terminal_lines[j-1], terminal_lines[j]);
+                }
+                terminal_line_count = TERMINAL_MAX_LINES - 1;
+            }
+            strcpy(terminal_lines[terminal_line_count], temp_line);
+            terminal_line_count++;
+            
+            t_idx = 0;
+            if (text[i] == '\n') { i++; continue; }
+        }
+        temp_line[t_idx++] = text[i++];
+    }
+    
+    // Kalan son harfleri de bas
+    if (t_idx > 0) {
+        temp_line[t_idx] = '\0';
+        if (terminal_line_count >= TERMINAL_MAX_LINES) {
+            for (int j = 1; j < TERMINAL_MAX_LINES; j++) {
+                strcpy(terminal_lines[j-1], terminal_lines[j]);
+            }
+            terminal_line_count = TERMINAL_MAX_LINES - 1;
+        }
+        strcpy(terminal_lines[terminal_line_count], temp_line);
+        terminal_line_count++;
+    }
+    force_redraw = 1;
+}
 // MULTITASKING API: Uygulamalarin Terminale Mesaj Gondermesi
 void api_print(const char* text) {
     unsigned int base = current_task->app_base;
     const char* real_text = (unsigned int)text < 0x100000 ? (const char*)(base + (unsigned int)text) : text;
     
-    strcpy(terminal_response, real_text); // Terminal metnini güncelle
-    force_redraw = 1;                     // Ekranın yenilenmesini sağla
+    // Artık üstüne yazmıyor, kaydırarak ekliyor!
+    terminal_print(real_text); 
 }
 // SYSCALL (API No 9) Tetiklendiğinde çalışır
 void api_exit_app() {
@@ -238,8 +285,12 @@ void render_gui() {
         draw_window(&windows[w_idx]); 
         
         if (w_idx == 0) {
-            draw_string_wrapped(windows[0].x + 10, windows[0].y + 40, windows[0].w - 20, terminal_response, 0x00000000, 0xFFFFFFFF); 
-            draw_string_wrapped(windows[0].x + 10, windows[0].y + windows[0].h - 30, windows[0].w - 20, user_input, 0x000000AA, 0xFFFFFFFF); 
+            // Kaydırmalı Terminal Çıktılarını Alt Alta Çiz
+            for (int line = 0; line < terminal_line_count; line++) {
+                draw_string(windows[0].x + 10, windows[0].y + 40 + (line * 16), terminal_lines[line], 0x00000000, 0xFFFFFFFF);
+            }
+            // Komut Giriş Satırını (Arda>) En Alta Çiz
+            draw_string(windows[0].x + 10, windows[0].y + windows[0].h - 25, user_input, 0x000000AA, 0xFFFFFFFF); 
         } 
         else if (w_idx == 1) {
             char info_text[128] = "Sistem Calisma Suresi:\n";
@@ -268,6 +319,7 @@ void render_gui() {
 // 4. MOTOR 2: KOMUT İŞLEYİCİ (COMMAND ENGINE)
 // ==========================================
 void execute_command(char* cmd) {
+    terminal_response[0] = '\0';
     if (strcmp(cmd, "") != 0) {
         strcpy(cmd_history[history_count % MAX_HISTORY], cmd);
         history_count++;
@@ -278,8 +330,9 @@ void execute_command(char* cmd) {
         strcpy(terminal_response, "Sistem: ArdaOS V0.3\nMimari: 32-bit x86\nOzel: Gercek Multitasking");
     } 
     else if (strcmp(cmd, "temizle") == 0) {
-        strcpy(terminal_response, ""); 
-    } 
+        terminal_line_count = 0; // Terminali gerçekten temizle!
+        terminal_response[0] = '\0'; 
+    }
     // ========================================================
     // DİNAMİK UYGULAMA YÜKLEYİCİ (DYNAMIC EXECUTION ENGINE)
     // ========================================================
@@ -468,6 +521,9 @@ void execute_command(char* cmd) {
     else {
         strcpy(terminal_response, "Hata: Bilinmeyen komut! 'help' yazarak komutlari gorebilirsiniz.");
     }
+    if (terminal_response[0] != '\0') {
+        terminal_print(terminal_response);
+    }
 }
 
 // ==========================================
@@ -484,6 +540,8 @@ void process_keyboard_events() {
             last_game_key = 0; 
             
             if (kbd_char == '\n') { 
+                terminal_print(user_input); // YENİ: Yazdığımız komutu ekranda kaydır
+                
                 char* cmd = &user_input[6]; 
                 execute_command(cmd);
                 strcpy(user_input, "Arda> ");
@@ -602,12 +660,15 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     windows[0].id = 0; windows[0].is_open = 1; windows[0].is_dragging = 0;
     windows[0].x = 100; windows[0].y = 100; windows[0].w = 450; windows[0].h = 350;
     strcpy(windows[0].title, "ArdaOS Terminali");
-
+    
     windows[1].id = 1; windows[1].is_open = 1; windows[1].is_dragging = 0;
     windows[1].x = 600; windows[1].y = 150; windows[1].w = 300; windows[1].h = 200;
     strcpy(windows[1].title, "Sistem Monitoru");
 
     focused_window = 0; last_mouse_x = mouse_x; last_mouse_y = mouse_y;
+    
+    // Terminali başlat
+    terminal_print("ArdaOS V0.3 Multitasking'e Hos Geldiniz!");
 
     // ==========================================
     // MULTITASKING ANA DÖNGÜSÜ

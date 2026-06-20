@@ -59,6 +59,23 @@ void kill_task_by_id(int task_id) {
         if (curr->next->id == task_id) { 
             task_t* target = curr->next;
             curr->next = target->next; 
+            
+            // =========================================================
+            // SEÇENEK 1: KUSURSUZ RAM İADESİ (TRUE DEALLOCATION)
+            // =========================================================
+            // 1. Görevin 4 KB'lık Yığın (Stack) belleğini iade et
+            if (target->stack_base != 0) {
+                free((void*)target->stack_base);
+            }
+            
+            // 2. Harici uygulama ise (PID >= 2), 4 KB'lık Kod belleğini iade et
+            if (target->id >= 2 && target->app_base != 0) {
+                free((void*)target->app_base);
+            }
+            
+            // 3. Görevin kendi kayıt bloğunu (task_t) sistemden sil
+            free(target);
+            
             return; 
         }
         curr = curr->next;

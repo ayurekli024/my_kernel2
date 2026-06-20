@@ -80,6 +80,7 @@ void init_paging(unsigned int framebuffer_addr) {
 struct block_header* heap_head;
 struct block_header* next_fit_ptr;
 // Heap sistemini ilk kez ayağa kaldıran fonksiyon
+unsigned int total_used_memory = 0;
 void init_heap() {
     heap_head = (struct block_header*) HEAP_START;
     heap_head->size = HEAP_SIZE - sizeof(struct block_header);
@@ -128,7 +129,7 @@ void* malloc(unsigned int size) {
             if (next_fit_ptr == 0) {
                 next_fit_ptr = heap_head;
             }
-            
+            total_used_memory += current->size;
             return (void*)((unsigned int)current + sizeof(struct block_header));
         }
         
@@ -158,7 +159,7 @@ void free(void* ptr) {
     // Kullanıcının veri adresinden geriye giderek gizli kimlik kartını (header) bul
     struct block_header* block = (struct block_header*)((unsigned int)ptr - sizeof(struct block_header));
     block->is_free = 1; // Bloğu serbest bırak
-    
+    total_used_memory -= block->size;
     // Parçalanmayı (Fragmentation) önlemek için Blok Birleştirme (Coalescing)
     // Tüm listeyi tara, yan yana duran iki "boş" blok varsa onları tek bir büyük blok yap
     struct block_header* current = heap_head;

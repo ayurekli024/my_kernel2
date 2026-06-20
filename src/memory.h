@@ -16,7 +16,7 @@ struct block_header {
     int is_free;               // 1 ise boş, 0 ise kullanımda
     struct block_header* next; // Listedeki bir sonraki bloğun adresi
 };
-
+extern unsigned int total_used_memory;
 void init_heap();
 void* malloc(unsigned int size);
 void free(void* ptr);

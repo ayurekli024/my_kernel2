@@ -432,6 +432,13 @@ void execute_command(char* cmd) {
             strcpy(terminal_response, "[ HATA ] Yetersiz Heap bellegi.");
         }
     }
+    else if (strcmp(cmd, "ram") == 0) {
+        char mem_str[16];
+        itoa(total_used_memory, mem_str);
+        strcpy(terminal_response, "[ SISTEM RAM ] Kullanilan: ");
+        strcat(terminal_response, mem_str);
+        strcat(terminal_response, " Bayt / 5242880 Bayt (5 MB)");
+    }
     else if (strcmp(cmd, "uptime") == 0) {
         char sec_str[10];
         itoa(timer_ticks / 100, sec_str);

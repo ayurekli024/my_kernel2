@@ -1,6 +1,6 @@
 #include "task.h"
 #include "memory.h" 
-
+#include "string.h"
 task_t* current_task;
 task_t* ready_queue;
 int next_pid = 1;
@@ -61,6 +61,46 @@ void kill_task_by_id(int task_id) {
             curr->next = target->next; 
             return; 
         }
+        curr = curr->next;
+    } while (curr != ready_queue);
+}
+void get_process_list(char* buffer) {
+    strcpy(buffer, "PID | DURUM  | BELLEK ADRESI\n");
+    strcat(buffer, "-----------------------------\n");
+    
+    if (ready_queue == 0) {
+        strcat(buffer, "Calisan gorev yok.\n");
+        return;
+    }
+    
+    task_t* curr = ready_queue;
+    do {
+        char pid_str[10];
+        itoa(curr->id, pid_str);
+        
+        strcat(buffer, " ");
+        strcat(buffer, pid_str);
+        if (curr->id < 10) strcat(buffer, "  | ");
+        else strcat(buffer, " | ");
+        
+        // Çekirdek mi, sistem görevi mi yoksa harici uygulama mı?
+        if (curr->id == 0) strcat(buffer, "KERNEL | ");
+        else if (curr->id == 1) strcat(buffer, "SYSTEM | ");
+        else strcat(buffer, "APP    | ");
+        
+        // Bellek adresini profesyonelce Hex (0x...) formatında yaz
+        char hex_str[16] = "0x";
+        unsigned int addr = curr->app_base;
+        char hex_chars[] = "0123456789ABCDEF";
+        int idx = 2;
+        for (int i = 28; i >= 0; i -= 4) {
+            hex_str[idx++] = hex_chars[(addr >> i) & 0x0F];
+        }
+        hex_str[idx] = '\0';
+        
+        strcat(buffer, hex_str);
+        strcat(buffer, "\n");
+        
         curr = curr->next;
     } while (curr != ready_queue);
 }

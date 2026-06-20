@@ -341,6 +341,32 @@ void execute_command(char* cmd) {
     else if (strcmp(cmd, "help") == 0) {
         strcpy(terminal_response, "KOMUTLAR:\n- help: Bu liste\n- info: Sistem detayi\n- temizle: Ekrani siler\n- renk [mavi/kirmizi]\n- memorytest: RAM saglik testi\n- uptime: Calisma suresi\n- saat: Donanim saati\n- yanki [mesaj]\n- hesapla [a + b]\n- ciz dikdortgen <x> <y> <w> <h> <renk>");
     }
+    // ========================================================
+    // YENİ: GÖREV YÖNETİCİSİ KOMUTLARI
+    // ========================================================
+    else if (strcmp(cmd, "ps") == 0) {
+        // task.c'deki fonksiyonu çağırıp sonucu terminale yazdır
+        get_process_list(terminal_response);
+    }
+    else if (strncmp(cmd, "kill ", 5) == 0) {
+        // "kill 3" yazıldığında 3 rakamını ayrıştır
+        int i = 5;
+        while(cmd[i] == ' ') i++;
+        int target_pid = atoi(&cmd[i]);
+        
+        // PID 0 (Kernel) ve PID 1 (Arka Plan Sayacı) sistemin kalbidir, dokunulamaz!
+        if (target_pid == 0 || target_pid == 1) {
+            strcpy(terminal_response, "[ HATA ] KERNEL veya SYSTEM gorevleri oldurulemez!");
+        } else {
+            // Ana döngüdeki "Cellat Motoru"na hedefi bildir!
+            task_to_kill = target_pid; 
+            
+            strcpy(terminal_response, "[ SISTEM ] Kill sinyali gonderildi: PID ");
+            char pid_str[10];
+            itoa(target_pid, pid_str);
+            strcat(terminal_response, pid_str);
+        }
+    }
     else if (strcmp(cmd, "ls") == 0 || strcmp(cmd, "dir") == 0) {
         ardaos_list_files(terminal_response);
     }

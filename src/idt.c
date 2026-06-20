@@ -56,6 +56,7 @@ extern void keyboard_handler(void);
 extern void mouse_handler(void);
 extern void timer_handler(void);
 extern void syscall_handler(void);
+extern void yield_handler(void);
 
 // Mavi Ekran (BSOD) Motoru
 void fault_handler(int int_no, int err_code) {
@@ -117,6 +118,7 @@ void init_idt(void) {
     idt_set_gate(33, (unsigned long)keyboard_handler, 0x08, 0x8E);
     idt_set_gate(44, (unsigned long)mouse_handler, 0x08, 0x8E);
     idt_set_gate(128, (unsigned long)syscall_handler, 0x08, 0x8E);
+    idt_set_gate(129, (unsigned long)yield_handler, 0x08, 0x8E); // Manuel Görev Değişimi
     __asm__ __volatile__ ("lidt %0" : : "m" (idt_ptr));
 }
 // ==========================================

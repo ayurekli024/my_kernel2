@@ -88,20 +88,41 @@ enable_paging:
     
     pop ebp
     ret
-; --- DONANIM SAATİ (PIT - IRQ0) KESMESİ ---
+; --- DONANIM SAATİ (PIT - IRQ0) KESMESİ VE ZAMANLAYICI ---
 global timer_handler
 extern timer_handler_main
+extern current_task  ; task.c'den gelen görev yöneticisi
 
 timer_handler:
-    pusha
-    call timer_handler_main
+    pusha  ; O anki görevin (Task) durumunu kaydet
     
     ; Anakarttaki PIC'e "Saati okudum" onayı (EOI) gönder
     mov al, 0x20
     out 0x20, al
     
-    popa
-    iretd
+    ; C'deki timer_ticks sayacını arttır
+    call timer_handler_main
+    
+    ; ====================================================
+    ; PREEMPTIVE MULTITASKING: KUSURSUZ GÖREV DEĞİŞİMİ
+    ; ====================================================
+    mov eax, [current_task]
+    cmp eax, 0          ; Görev sistemi henüz başlamadıysa atla
+    je .no_switch
+    
+    ; 1. Eski görevin yığınını (ESP) kaydet
+    mov [eax], esp      ; current_task->esp = esp
+    
+    ; 2. Sıradaki göreve geç: current_task = current_task->next
+    mov ebx, [eax + 16] ; 16. byte, "next" pointer'ıdır
+    mov [current_task], ebx
+    
+    ; 3. Yeni görevin yığınını (ESP) işlemciye yükle
+    mov esp, [ebx]      ; esp = current_task->esp
+
+.no_switch:
+    popa   ; Yüklenen yeni yığındaki değerleri yazmaçlara dök
+    iretd  ; Yeni göreve zıpla!
 ; --- İSTİSNA (EXCEPTION) YAKALAYICILARI ---
 global isr0
 global isr6
@@ -247,3 +268,26 @@ syscall_handler:
     
     popa                ; Yazmaçları eski haline getir (Yeni EAX ile birlikte)
     iretd               ; Uygulamaya geri dön
+
+; ====================================================
+; MANUEL GÖREV DEĞİŞTİRİCİ (Yazılımsal Kesme - INT 129)
+; Saat (Timer) sayacını bozmadan sadece görevi değiştirir!
+; ====================================================
+global yield_handler
+extern current_task
+
+yield_handler:
+    pusha               ; O anki yazmaçları kaydet
+    
+    mov eax, [current_task]
+    cmp eax, 0          
+    je .no_yield_switch
+    
+    mov [eax], esp      ; current_task->esp = esp
+    mov ebx, [eax + 16] ; ebx = current_task->next
+    mov [current_task], ebx
+    mov esp, [ebx]      ; esp = current_task->next->esp
+
+.no_yield_switch:
+    popa
+    iretd

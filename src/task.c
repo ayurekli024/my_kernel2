@@ -5,8 +5,6 @@ task_t* current_task;
 task_t* ready_queue;
 int next_pid = 1;
 
-extern void task_switch(unsigned int *prev_esp, unsigned int next_esp);
-
 void init_tasking() {
     current_task = (task_t*)malloc(sizeof(task_t));
     current_task->id = 0;
@@ -24,11 +22,21 @@ int create_task(void (*func)(void), unsigned int app_base) {
     new_task->stack_base = (unsigned int)stack;
     unsigned int* stack_top = (unsigned int*)((unsigned int)stack + 4096); 
     
-    *(--stack_top) = (unsigned int)func; 
-    *(--stack_top) = 0; 
-    *(--stack_top) = 0; 
-    *(--stack_top) = 0; 
-    *(--stack_top) = 0; 
+    // --- KUSURSUZ ZIRH: SAHTE DONANIM KESMESİ (FORGED IRET FRAME) ---
+    // İşlemci bu yığını gördüğünde, görevin donanım tarafından durdurulduğunu sanacak!
+    *(--stack_top) = 0x202; // EFLAGS (Interrupts Enabled flag - IF)
+    *(--stack_top) = 0x08;  // CS (Code Segment)
+    *(--stack_top) = (unsigned int)func; // EIP (Fonksiyonun başlangıç adresi)
+    
+    // --- PUSHA FRAME (8 Yazmaç) ---
+    *(--stack_top) = 0; // EAX
+    *(--stack_top) = 0; // ECX
+    *(--stack_top) = 0; // EDX
+    *(--stack_top) = 0; // EBX
+    *(--stack_top) = 0; // ESP (pusha tarafından itilir ama popa tarafından yok sayılır)
+    *(--stack_top) = 0; // EBP
+    *(--stack_top) = 0; // ESI
+    *(--stack_top) = 0; // EDI
     
     new_task->esp = (unsigned int)stack_top;
     
@@ -38,12 +46,9 @@ int create_task(void (*func)(void), unsigned int app_base) {
     return new_task->id; 
 }
 
+// ARTIK TASK_SWITCH YOK! Yield doğrudan donanım kesmesini tetikler.
 void yield() {
-    task_t* prev = current_task;
-    current_task = current_task->next;
-    if (prev != current_task) {
-        task_switch(&prev->esp, current_task->esp);
-    }
+    __asm__ __volatile__ ("int $129"); // Saati bozmayan yeni görev değiştiricimiz!
 }
 
 void kill_task_by_id(int task_id) {

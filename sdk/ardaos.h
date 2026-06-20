@@ -1,7 +1,8 @@
 #ifndef ARDAOS_H
 #define ARDAOS_H
-
-static inline void sys_yield() { __asm__ __volatile__ ("int $0x80" : : "a"(4)); }
+static inline void sys_yield() {
+    __asm__ __volatile__ ("int $129");
+}
 static inline void add_shape(int x, int y, int w, int h, unsigned int color) { __asm__ __volatile__ ("int $0x80" : : "a"(5), "b"(x), "c"(y), "d"(w), "S"(h), "D"(color)); }
 static inline char sys_get_key() { int key; __asm__ __volatile__ ("int $0x80" : "=a"(key) : "a"(6)); return (char)key; }
 static inline void sys_clear_shapes() { __asm__ __volatile__ ("int $0x80" : : "a"(7)); }

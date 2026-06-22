@@ -8,7 +8,10 @@ int next_pid = 1;
 void init_tasking() {
     current_task = (task_t*)malloc(sizeof(task_t));
     current_task->id = 0;
-    current_task->app_base = 0; 
+    current_task->app_base = 0;
+    // init_tasking() ve create_task() içindeki atamaların arasına ekle:
+    current_task->cpu_ticks = 0; // (create_task için new_task->cpu_ticks = 0;)
+    current_task->cpu_usage = 0; // (create_task için new_task->cpu_usage = 0;) 
     current_task->next = current_task; 
     ready_queue = current_task;
 }
@@ -17,7 +20,10 @@ int create_task(void (*func)(void), unsigned int app_base, char* args) {
     task_t* new_task = (task_t*)malloc(sizeof(task_t));
     new_task->id = next_pid++;
     new_task->app_base = app_base; 
-    
+    // init_tasking() ve create_task() içindeki atamaların arasına ekle:
+    new_task->cpu_ticks = 0;
+    new_task->cpu_usage = 0;
+    new_task->state = 0; // Yeni görev varsayılan olarak "Çalışabilir" başlar
     unsigned int* stack = (unsigned int*)malloc(4096);
     new_task->stack_base = (unsigned int)stack;
     unsigned int stack_top_addr = (unsigned int)stack + 4096; 
@@ -64,7 +70,19 @@ int create_task(void (*func)(void), unsigned int app_base, char* args) {
     
     return new_task->id; 
 }
-
+// YENİ: Uyuyan bir görevi dışarıdan uyandırma servisi
+void wake_task_by_id(int task_id) {
+    if (ready_queue == 0) return;
+    
+    task_t* curr = ready_queue;
+    do {
+        if (curr->id == task_id) {
+            curr->state = 0; // 0 = RUNNABLE (Uykudan uyandır)
+            return;
+        }
+        curr = curr->next;
+    } while (curr != ready_queue);
+}
 // ARTIK TASK_SWITCH YOK! Yield doğrudan donanım kesmesini tetikler.
 void yield() {
     __asm__ __volatile__ ("int $129"); // Saati bozmayan yeni görev değiştiricimiz!

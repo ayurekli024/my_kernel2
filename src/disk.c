@@ -214,17 +214,99 @@ void ardaos_list_files(char* output_buffer) {
     int found = 0;
     for (int i = 0; i < 16; i++) {
         if (root_dir[i].name[0] != 0 && root_dir[i].name[0] != (char)0xE5) {
-            if (root_dir[i].attr == 0x0F || (root_dir[i].attr & 0x08)) continue;
+            if (root_dir[i].attr == 0x0F || (root_dir[i].attr == 0x08)) continue;
             found++;
             char temp_name[9]; char temp_ext[4];
             for(int j=0; j<8; j++) temp_name[j] = root_dir[i].name[j];
             for(int j=0; j<3; j++) temp_ext[j] = root_dir[i].ext[j];
             temp_name[8] = '\0'; temp_ext[3] = '\0';
-            char size_str[16]; itoa(root_dir[i].size, size_str);
+            
             strcat(output_buffer, "- "); strcat(output_buffer, temp_name);
-            strcat(output_buffer, "."); strcat(output_buffer, temp_ext);
-            strcat(output_buffer, "   ("); strcat(output_buffer, size_str); strcat(output_buffer, " Bayt)\n");
+            
+            // YENİ: Dizin ise [KLASOR] yazdır, değilse boyutunu yazdır
+            if (root_dir[i].attr & 0x10) {
+                strcat(output_buffer, "   [KLASOR]\n");
+            } else {
+                strcat(output_buffer, "."); strcat(output_buffer, temp_ext);
+                char size_str[16]; itoa(root_dir[i].size, size_str);
+                strcat(output_buffer, "   ("); strcat(output_buffer, size_str); strcat(output_buffer, " Bayt)\n");
+            }
         }
     }
     if (found == 0) strcat(output_buffer, "Disk tamamen bos.");
+}
+// ==========================================================
+// FAT16 DOSYA SİLME MOTORU (0xE5 Sihri ve Zincir Kırma)
+// ==========================================================
+int ardaos_delete_file(const char* filename, const char* ext) {
+    directory_entry_t root_dir[16];
+    ata_lba_read(root_dir_start_lba, 1, (unsigned short*)root_dir);
+
+    int target_slot = -1;
+    unsigned short target_cluster = 0;
+
+    // 1. Dosyayı Root Directory'de Bul
+    for (int i = 0; i < 16; i++) {
+        if (root_dir[i].name[0] == 0x00 || root_dir[i].name[0] == (char)0xE5) continue;
+        if (strncmp(root_dir[i].name, filename, 8) == 0 && strncmp(root_dir[i].ext, ext, 3) == 0) {
+            target_slot = i;
+            target_cluster = root_dir[i].cluster;
+            break;
+        }
+    }
+
+    if (target_slot == -1) return -1; // Dosya bulunamadı
+
+    // 2. Dosyanın isminin ilk harfini 0xE5 (Silinmiş) olarak işaretle
+    root_dir[target_slot].name[0] = (char)0xE5;
+    ata_lba_write(root_dir_start_lba, 1, (unsigned short*)root_dir);
+
+    // 3. FAT Tablosundaki Alanları Serbest Bırak (Zinciri Kır)
+    if (target_cluster >= 2) {
+        unsigned short fat_table[256];
+        unsigned int fat_lba = bpb.reserved_sectors;
+        ata_lba_read(fat_lba, 1, fat_table);
+
+        unsigned short current_cluster = target_cluster;
+        // FAT16 dosya sonu işareti 0xFFF8'den büyüktür
+        while (current_cluster >= 2 && current_cluster < 0xFFF8) {
+            unsigned short next_cluster = fat_table[current_cluster];
+            fat_table[current_cluster] = 0x0000; // Sektörü boşa çıkar
+            current_cluster = next_cluster;
+        }
+
+        ata_lba_write(fat_lba, 1, fat_table);
+        if (bpb.fat_count > 1) {
+            ata_lba_write(fat_lba + bpb.sectors_per_fat, 1, fat_table);
+        }
+    }
+    return 0; // Başarıyla silindi
+}
+
+// ==========================================================
+// FAT16 KLASÖR OLUŞTURMA MOTORU (Attribute 0x10)
+// ==========================================================
+int ardaos_create_dir(const char* dirname) {
+    directory_entry_t root_dir[16];
+    ata_lba_read(root_dir_start_lba, 1, (unsigned short*)root_dir);
+
+    int target_slot = -1;
+    for (int i = 0; i < 16; i++) {
+        if (root_dir[i].name[0] == 0x00 || root_dir[i].name[0] == (char)0xE5) {
+            target_slot = i; break; // Boş yer bulundu
+        }
+    }
+
+    if (target_slot == -1) return -1; // Dizin dolu
+
+    // İsmi kopyala (Boşluk ile doldurulmuş)
+    for(int i=0; i<8; i++) root_dir[target_slot].name[i] = dirname[i];
+    for(int i=0; i<3; i++) root_dir[target_slot].ext[i] = ' '; 
+    
+    root_dir[target_slot].attr = 0x10; // 0x10 ATTR_DIRECTORY işaretleyicisi
+    root_dir[target_slot].cluster = 0; 
+    root_dir[target_slot].size = 0;
+    
+    ata_lba_write(root_dir_start_lba, 1, (unsigned short*)root_dir);
+    return 0;
 }

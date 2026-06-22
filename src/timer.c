@@ -1,6 +1,6 @@
 #include "timer.h"
 #include "io.h"
-
+#include "task.h" // YENİ: O anki görevi (current_task) görebilmek için
 // YENİ: volatile eklendi
 volatile unsigned int timer_ticks = 0;
 
@@ -19,4 +19,7 @@ void init_timer(unsigned int frequency) {
 
 void timer_handler_main() {
     timer_ticks++;
+    if (current_task != 0) {
+        current_task->cpu_ticks++; 
+    }
 }

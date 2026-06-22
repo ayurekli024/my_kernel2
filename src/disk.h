@@ -36,4 +36,7 @@ int ardaos_read_file(const char* filename, const char* ext, unsigned char* targe
 int ardaos_write_file(const char* filename, const char* ext, unsigned int size, unsigned char* source_buffer);
 void ardaos_list_files(char* output_buffer);
 
+int ardaos_delete_file(const char* filename, const char* ext);
+int ardaos_create_dir(const char* dirname);
+
 #endif

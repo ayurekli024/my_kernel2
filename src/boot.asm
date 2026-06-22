@@ -104,23 +104,34 @@ timer_handler:
     call timer_handler_main
     
     ; ====================================================
-    ; PREEMPTIVE MULTITASKING: KUSURSUZ GÖREV DEĞİŞİMİ
+    ; PREEMPTIVE MULTITASKING: UYUYANLARI ATLAYAN SCHEDULER
     ; ====================================================
     mov eax, [current_task]
     cmp eax, 0          ; Görev sistemi henüz başlamadıysa atla
-    je .no_switch
+    je .no_timer_switch
     
     ; 1. Eski görevin yığınını (ESP) kaydet
-    mov [eax], esp      ; current_task->esp = esp
-    
+    mov [eax], esp      
+
+.timer_find_next_task:
     ; 2. Sıradaki göreve geç: current_task = current_task->next
     mov ebx, [eax + 16] ; 16. byte, "next" pointer'ıdır
     mov [current_task], ebx
     
-    ; 3. Yeni görevin yığınını (ESP) işlemciye yükle
-    mov esp, [ebx]      ; esp = current_task->esp
+    ; 3. Sıradaki görevin State (Durum) değerini kontrol et (state = +20)
+    mov ecx, [ebx + 20]
+    cmp ecx, 1              ; Görev BLOCKED (Uyuyor) mu?
+    je .timer_skip_sleeping ; Uyuyorsa hiç bulaşma, atla!
+    
+    ; 4. Görev uyanıksa (0), yeni görevin yığınını (ESP) işlemciye yükle
+    mov esp, [ebx]      
+    jmp .no_timer_switch
 
-.no_switch:
+.timer_skip_sleeping:
+    mov eax, ebx            ; Uyuyan görevi 'eax' yap ve bir sonrakini aramaya devam et
+    jmp .timer_find_next_task
+
+.no_timer_switch:
     popa   ; Yüklenen yeni yığındaki değerleri yazmaçlara dök
     iretd  ; Yeni göreve zıpla!
 ; --- İSTİSNA (EXCEPTION) YAKALAYICILARI ---
@@ -270,23 +281,38 @@ syscall_handler:
     iretd               ; Uygulamaya geri dön
 
 ; ====================================================
-; MANUEL GÖREV DEĞİŞTİRİCİ (Yazılımsal Kesme - INT 129)
-; Saat (Timer) sayacını bozmadan sadece görevi değiştirir!
+; MANUEL GÖREV DEĞİŞTİRİCİ VE SCHEDULER ZEKA KÜPÜ
 ; ====================================================
 global yield_handler
 extern current_task
 
 yield_handler:
-    pusha               ; O anki yazmaçları kaydet
+    pusha               
     
     mov eax, [current_task]
     cmp eax, 0          
     je .no_yield_switch
     
-    mov [eax], esp      ; current_task->esp = esp
-    mov ebx, [eax + 16] ; ebx = current_task->next
+    ; 1. Eski görevin ESP'sini kaydet
+    mov [eax], esp      
+
+.find_next_task:
+    ; 2. Sıradaki göreve geç (next = +16)
+    mov ebx, [eax + 16] 
     mov [current_task], ebx
-    mov esp, [ebx]      ; esp = current_task->next->esp
+    
+    ; 3. Sıradaki görevin State (Durum) değerini kontrol et (state = +20)
+    mov ecx, [ebx + 20]
+    cmp ecx, 1          ; Görev BLOCKED (Uyuyor) mu?
+    je .skip_sleeping   ; Uyuyorsa atla!
+    
+    ; 4. Görev uyanıksa (0), ESP'yi yükle ve çalıştır
+    mov esp, [ebx]      
+    jmp .no_yield_switch
+
+.skip_sleeping:
+    mov eax, ebx        ; Uyuyan görevi 'eax' yap ve aramaya devam et
+    jmp .find_next_task
 
 .no_yield_switch:
     popa

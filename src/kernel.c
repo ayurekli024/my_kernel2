@@ -147,19 +147,20 @@ void api_clear_shapes() {
 }
 // MULTITASKING API: Sadece odaklanmış pencerenin sahibi klavyeyi okuyabilir!
 int api_get_key() {
-    // 1. Önce aktif odaklanmış bir harici pencere (ID >= 2) var mı kontrol et
     if (focused_window >= 2 && windows[focused_window].is_open) {
-        
-        // 2. Bu API'yi çağıran Görev (Task), aktif pencerenin SAHİBİ mi?
         if (windows[focused_window].owner_task_id == current_task->id) {
             char k = last_game_key;
-            last_game_key = 0; // Tuşu sahibine teslim ettik, tamponu temizle
-            return k;
+            last_game_key = 0;
+            
+            // Eğer tuş geldiyse, görevin durumu zaten RUNNABLE (0) kalsın ve tuşu döndür
+            if (k != 0) return k;
+            
+            // TUŞ YOKSA GÖREVİ UYUT! (İşlemci yemesin)
+            current_task->state = 1; // 1 = BLOCKED
+            return 0;
         }
     }
-    
-    // Eğer pencere aktif değilse veya API'yi çağıran Task o pencerenin sahibi değilse
-    return 0; // "Tuşa basılmadı" yalanını söyleyerek diğerlerini dondur!
+    return 0; 
 }
 // MULTITASKING API: Harici uygulamanın güvenli şekilde dosya yazması
 int api_write_file(const char* name, const char* ext, unsigned char* buffer) {
@@ -293,12 +294,64 @@ void render_gui() {
             draw_string(windows[0].x + 10, windows[0].y + windows[0].h - 25, user_input, 0x000000AA, 0xFFFFFFFF); 
         } 
         else if (w_idx == 1) {
-            char info_text[128] = "Sistem Calisma Suresi:\n";
-            char sec_str[10];
-            itoa(timer_ticks / 100, sec_str);
-            strcat(info_text, sec_str);
-            strcat(info_text, " Saniye\n\nBellek Durumu: OK\nMultitasking: Aktif");
-            draw_string_wrapped(windows[1].x + 10, windows[1].y + 50, windows[1].w - 20, info_text, 0x00000000, 0xFFFFFFFF);
+            // Sütun Başlıkları
+            draw_string(windows[1].x + 10, windows[1].y + 40, "PID  DURUM   CPU%", 0x00000000, 0xFFFFFFFF);
+            draw_rect(windows[1].x + 10, windows[1].y + 55, windows[1].w - 20, 2, 0x00BBBBBB);
+
+            if (ready_queue != 0) {
+                // 1. Görevleri UI için geçici bir diziye topla
+                task_t* task_array[32]; // Maksimum 32 görev varsayımı
+                int task_count = 0;
+                task_t* curr = ready_queue;
+                do {
+                    if (task_count < 32) task_array[task_count++] = curr;
+                    curr = curr->next;
+                } while (curr != ready_queue);
+
+                // 2. Diziyi PID Numarasına Göre Sırala (Bubble Sort)
+                for (int i = 0; i < task_count - 1; i++) {
+                    for (int j = 0; j < task_count - i - 1; j++) {
+                        if (task_array[j]->id > task_array[j+1]->id) {
+                            task_t* temp = task_array[j];
+                            task_array[j] = task_array[j+1];
+                            task_array[j+1] = temp;
+                        }
+                    }
+                }
+
+                // 3. Ekrana Küçükten Büyüğe Sıralı Şekilde Çiz
+                int y_offset = 65;
+                for (int i = 0; i < task_count && y_offset < windows[1].h - 20; i++) {
+                    task_t* t = task_array[i];
+                    
+                    // 1. Görev ID'si (PID)
+                    char pid_str[4];
+                    itoa(t->id, pid_str);
+                    draw_string(windows[1].x + 10, windows[1].y + y_offset, pid_str, 0x00000000, 0xFFFFFFFF);
+                    
+                    // 2. Durum Yazdır
+                    const char* state_str = (t->state == 0) ? "RUN" : "BLK";
+                    unsigned int state_color = (t->state == 0) ? 0x0000AA00 : 0x00AA0000;
+                    draw_string(windows[1].x + 45, windows[1].y + y_offset, state_str, state_color, 0xFFFFFFFF);
+                    
+                    // 3. Yüzde Metni
+                    char usage_str[8];
+                    itoa(t->cpu_usage, usage_str);
+                    strcat(usage_str, "%");
+                    draw_string(windows[1].x + 100, windows[1].y + y_offset, usage_str, 0x00000000, 0xFFFFFFFF);
+                    
+                    // 4. CANLI GRAFİK BAR
+                    unsigned int bar_color = (t->cpu_usage > 50) ? ((t->cpu_usage > 80) ? 0x00FF0000 : 0x00FFAA00) : 0x0000AA00;
+                    int bar_width = t->cpu_usage * 1.3; 
+                    if (bar_width > 130) bar_width = 130;  
+                    
+                    if (bar_width > 0) {
+                        draw_rect(windows[1].x + 150, windows[1].y + y_offset, bar_width, 10, bar_color);
+                    }
+
+                    y_offset += 20;
+                }
+            }
         }
         else if (w_idx >= 2) {
             draw_rect(windows[w_idx].x + 2, windows[w_idx].y + 32, windows[w_idx].w - 4, windows[w_idx].h - 34, 0x00000000);
@@ -456,6 +509,114 @@ void execute_command(char* cmd) {
         strcat(terminal_response, sec_str);
         strcat(terminal_response, " saniye");
     }
+    // ========================================================
+    // YENİ: DOSYA YAZMA (TOUCH / ECHO >)
+    // ========================================================
+    else if (strcmp(first_word, "yaz") == 0) {
+        if (app_args[0] == '\0') {
+            strcpy(terminal_response, "Hata: Kullanim -> yaz DOSYA.TXT Icerik metni...");
+        } else {
+            char fat_name[9] = "        ";
+            char fat_ext[4] = "   ";
+            char file_content[512] = {0}; // Maksimum 1 sektörlük (512 bayt) metin
+
+            int i = 0, k = 0;
+            
+            // 1. Dosya adını 8 karakter FAT formatına çevir
+            while (app_args[i] != '.' && app_args[i] != ' ' && app_args[i] != '\0' && k < 8) {
+                char c = app_args[i++];
+                if (c >= 'a' && c <= 'z') c -= 32;
+                fat_name[k++] = c;
+            }
+            
+            // 2. Noktayı atla ve uzantıyı 3 karakter FAT formatına çevir
+            if (app_args[i] == '.') {
+                i++; k = 0;
+                while (app_args[i] != ' ' && app_args[i] != '\0' && k < 3) {
+                    char c = app_args[i++];
+                    if (c >= 'a' && c <= 'z') c -= 32;
+                    fat_ext[k++] = c;
+                }
+            }
+
+            // 3. Dosya adından sonraki boşlukları atla (İçeriğe geçiş)
+            while (app_args[i] == ' ') i++;
+
+            // 4. Geri kalan tüm metni dosya içeriği olarak kopyala
+            int c_idx = 0;
+            while (app_args[i] != '\0' && c_idx < 511) {
+                file_content[c_idx++] = app_args[i++];
+            }
+            file_content[c_idx] = '\0'; // Metnin sonunu belirle
+
+            // 5. İçerik boş mu kontrol et, değilse diske fırlat!
+            if (c_idx == 0) {
+                 strcpy(terminal_response, "Hata: Dosyaya yazilacak icerik bos olamaz!");
+            } else {
+                 if (ardaos_write_file(fat_name, fat_ext, c_idx, (unsigned char*)file_content) == 0) {
+                     strcpy(terminal_response, "[ BASARILI ] Dosya diske yazildi.");
+                 } else {
+                     strcpy(terminal_response, "[ HATA ] Dosya diske yazilamadi (Disk dolu olabilir).");
+                 }
+            }
+        }
+    }
+    // ========================================================
+    // YENİ: DOSYA SİLME (RM) VE KLASÖR AÇMA (MKDIR)
+    // ========================================================
+    else if (strcmp(first_word, "rm") == 0) {
+        if (app_args[0] == '\0') {
+            strcpy(terminal_response, "Hata: Silinecek dosyayi belirtin (Orn: rm SKOR.TXT)");
+        } else {
+            char fat_name[9] = "        "; 
+            char fat_ext[4] = "   ";
+            int i = 0, k = 0;
+            // Dosya adını 8 karakter FAT formatına çevir
+            while (app_args[i] != '.' && app_args[i] != '\0' && k < 8) {
+                char c = app_args[i++];
+                if (c >= 'a' && c <= 'z') c -= 32;
+                fat_name[k++] = c;
+            }
+            if (app_args[i] == '.') {
+                i++; k = 0;
+                // Uzantıyı 3 karakter FAT formatına çevir
+                while (app_args[i] != '\0' && k < 3) {
+                    char c = app_args[i++];
+                    if (c >= 'a' && c <= 'z') c -= 32;
+                    fat_ext[k++] = c;
+                }
+            }
+            fat_name[8] = '\0'; fat_ext[3] = '\0';
+            
+            if (ardaos_delete_file(fat_name, fat_ext) == 0) {
+                strcpy(terminal_response, "[ BASARILI ] Dosya diskten kalici olarak silindi.");
+            } else {
+                strcpy(terminal_response, "[ HATA ] Dosya diskte bulunamadi!");
+            }
+        }
+    }
+    else if (strcmp(first_word, "mkdir") == 0) {
+        if (app_args[0] == '\0') {
+            strcpy(terminal_response, "Hata: Klasor adini belirtin (Orn: mkdir OYUNLAR)");
+        } else {
+            char fat_name[9] = "        ";
+            int i = 0;
+            // Klasör adını 8 karakter FAT formatına çevir
+            while(app_args[i] != ' ' && app_args[i] != '\0' && i < 8) {
+                char c = app_args[i];
+                if (c >= 'a' && c <= 'z') c -= 32;
+                fat_name[i] = c;
+                i++;
+            }
+            fat_name[8] = '\0';
+            
+            if (ardaos_create_dir(fat_name) == 0) {
+                strcpy(terminal_response, "[ BASARILI ] Klasor diskte olusturuldu.");
+            } else {
+                strcpy(terminal_response, "[ HATA ] Klasor olusturulamadi (Disk dolu).");
+            }
+        }
+    }
     else if (strcmp(cmd, "saat") == 0) {
         unsigned char h = bcd_to_bin(get_rtc_register(0x04));
         unsigned char m = bcd_to_bin(get_rtc_register(0x02));
@@ -550,6 +711,10 @@ void process_keyboard_events() {
     char kbd_char = get_keyboard_char();
     if (kbd_char != 0) {
         force_redraw = 1;
+        
+        if (focused_window >= 2 && windows[focused_window].is_open) {
+            wake_task_by_id(windows[focused_window].owner_task_id);
+        }
         
         if (focused_window >= 2 && windows[focused_window].is_open) {
             last_game_key = kbd_char;
@@ -716,7 +881,20 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
 
         int current_second = timer_ticks / 100;
         if (current_second != last_second) {
-            last_second = current_second; force_redraw = 1; 
+            last_second = current_second; 
+            
+            // --- CANLI CPU HESAPLAMA MOTORU ---
+            if (ready_queue != 0) {
+                task_t* curr = ready_queue;
+                do {
+                    // 100 Tick = %100. Sayacı direkt yüzdeye kopyala!
+                    curr->cpu_usage = curr->cpu_ticks; 
+                    curr->cpu_ticks = 0; // Bir sonraki saniye için sıfırla
+                    
+                    curr = curr->next;
+                } while (curr != ready_queue);
+            }
+            force_redraw = 1; 
         }
 
         process_mouse_events();

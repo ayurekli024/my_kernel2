@@ -13,27 +13,46 @@ void init_tasking() {
     ready_queue = current_task;
 }
 
-int create_task(void (*func)(void), unsigned int app_base) {
+int create_task(void (*func)(void), unsigned int app_base, char* args) {
     task_t* new_task = (task_t*)malloc(sizeof(task_t));
     new_task->id = next_pid++;
     new_task->app_base = app_base; 
     
     unsigned int* stack = (unsigned int*)malloc(4096);
     new_task->stack_base = (unsigned int)stack;
-    unsigned int* stack_top = (unsigned int*)((unsigned int)stack + 4096); 
+    unsigned int stack_top_addr = (unsigned int)stack + 4096; 
+    
+    // =========================================================
+    // 1. ARGÜMANI YIĞINA (STACK) GİZLİCE KOPYALA
+    // =========================================================
+    char* target_args = 0;
+    if (args != 0 && args[0] != '\0') {
+        int arg_len = strlen(args) + 1;
+        stack_top_addr -= arg_len;
+        strcpy((char*)stack_top_addr, args); // Metni stack'in tepesine yaz
+        target_args = (char*)stack_top_addr; // Adresini kaydet
+        stack_top_addr &= ~3;                // Stack'i GCC'nin sevdiği gibi 4 bayta hizala
+    }
+    
+    unsigned int* stack_top = (unsigned int*)stack_top_addr;
+    
+    // =========================================================
+    // 2. CDECL STANDARDI: PARAMETRE VE DÖNÜŞ ADRESİ
+    // =========================================================
+    *(--stack_top) = (unsigned int)target_args; // [ESP + 4]: 1. Argüman (char* args)
+    *(--stack_top) = 0x00000000;                // [ESP + 0]: Sahte Dönüş Adresi (sys_exit çağırmazsa çöker)
     
     // --- KUSURSUZ ZIRH: SAHTE DONANIM KESMESİ (FORGED IRET FRAME) ---
-    // İşlemci bu yığını gördüğünde, görevin donanım tarafından durdurulduğunu sanacak!
-    *(--stack_top) = 0x202; // EFLAGS (Interrupts Enabled flag - IF)
-    *(--stack_top) = 0x08;  // CS (Code Segment)
-    *(--stack_top) = (unsigned int)func; // EIP (Fonksiyonun başlangıç adresi)
+    *(--stack_top) = 0x202; // EFLAGS
+    *(--stack_top) = 0x08;  // CS
+    *(--stack_top) = (unsigned int)func; // EIP (Fonksiyon adresi)
     
     // --- PUSHA FRAME (8 Yazmaç) ---
     *(--stack_top) = 0; // EAX
     *(--stack_top) = 0; // ECX
     *(--stack_top) = 0; // EDX
     *(--stack_top) = 0; // EBX
-    *(--stack_top) = 0; // ESP (pusha tarafından itilir ama popa tarafından yok sayılır)
+    *(--stack_top) = 0; // ESP
     *(--stack_top) = 0; // EBP
     *(--stack_top) = 0; // ESI
     *(--stack_top) = 0; // EDI

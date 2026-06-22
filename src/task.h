@@ -11,8 +11,7 @@ typedef struct task {
 
 extern task_t* current_task;
 void init_tasking(void);
-int create_task(void (*func)(void), unsigned int app_base); 
-void yield(void);
+int create_task(void (*func)(void), unsigned int app_base, char* args);void yield(void);
 void kill_task_by_id(int task_id);
 void get_process_list(char* buffer); // YENI EKLENDI
 

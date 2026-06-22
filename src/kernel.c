@@ -320,6 +320,20 @@ void render_gui() {
 // ==========================================
 void execute_command(char* cmd) {
     terminal_response[0] = '\0';
+    
+    // YENİ: Komutu ve parametreyi ayır (Örn: "okuyucu.bin SKOR.TXT")
+    char first_word[32];
+    char app_args[128] = "";
+    int f_idx = 0;
+    while (cmd[f_idx] != ' ' && cmd[f_idx] != '\0' && f_idx < 31) {
+        first_word[f_idx] = cmd[f_idx];
+        f_idx++;
+    }
+    first_word[f_idx] = '\0';
+    if (cmd[f_idx] == ' ') {
+        strcpy(app_args, &cmd[f_idx + 1]);
+    }
+    int fw_len = strlen(first_word);
     if (strcmp(cmd, "") != 0) {
         strcpy(cmd_history[history_count % MAX_HISTORY], cmd);
         history_count++;
@@ -337,47 +351,43 @@ void execute_command(char* cmd) {
     // DİNAMİK UYGULAMA YÜKLEYİCİ (DYNAMIC EXECUTION ENGINE)
     // ========================================================
     // Eğer girilen komutun sonu ".bin" veya ".BIN" ile bitiyorsa
-    else if (strlen(cmd) > 4 && 
-            (strcmp(cmd + strlen(cmd) - 4, ".bin") == 0 || 
-             strcmp(cmd + strlen(cmd) - 4, ".BIN") == 0)) {
+    // ========================================================
+    // DİNAMİK UYGULAMA YÜKLEYİCİ (Parametre Destekli)
+    // ========================================================
+    // İlk kelime ".bin" veya ".BIN" ile bitiyorsa
+    else if (fw_len > 4 && 
+            (strcmp(first_word + fw_len - 4, ".bin") == 0 || 
+             strcmp(first_word + fw_len - 4, ".BIN") == 0)) {
         
-        // 1. Dosya adını ve uzantısını FAT16 standardına (8+3) göre ayır
         char raw_name[16];
-        strcpy(raw_name, cmd);
-        raw_name[strlen(cmd) - 4] = '\0'; // Uzantıyı kes (Örn: "TESTAPP")
+        strcpy(raw_name, first_word);
+        raw_name[fw_len - 4] = '\0'; // Uzantıyı kes (Örn: "OKUYUCU")
         
-        // FAT16 için ismi 8 karaktere tamamlayıp boşlukla doldurmamız gerekir (Örn: "TESTAPP ")
         char fat_name[9] = "        "; 
         for(int i = 0; i < 8 && raw_name[i] != '\0'; i++) {
             fat_name[i] = raw_name[i];
-            // Harfleri büyük harfe çevir (FAT16 standart olarak büyük harf saklar)
-            if(fat_name[i] >= 'a' && fat_name[i] <= 'z') {
-                fat_name[i] = fat_name[i] - 32;
-            }
+            if(fat_name[i] >= 'a' && fat_name[i] <= 'z') fat_name[i] -= 32;
         }
         fat_name[8] = '\0';
 
-        // 2. RAM'den 4 KB'lık temiz bir yer ayır
         unsigned char* app_memory = (unsigned char*)malloc(4096); 
         if (app_memory != 0) {
-            
-            // 3. Dosyayı dinamik olarak diskten oku
             int file_size = ardaos_read_file(fat_name, "BIN", app_memory);
-            
             if (file_size > 0) {
                 void (*app_entry)() = (void (*)())app_memory;
                 
-                // 4. Yeni görev (Task) olarak süreç tablosuna ekle!
-                create_task(app_entry, (unsigned int)app_memory);
+                // İŞTE SİHİR BURADA: Ayrıştırılan parametreyi Stack'e yolla!
+                create_task(app_entry, (unsigned int)app_memory, app_args);
                 
                 strcpy(terminal_response, "[ SISTEM ] ");
                 strcat(terminal_response, raw_name);
-                strcat(terminal_response, " basariyla yüklendi ve baslatildi!");
+                if (app_args[0] != '\0') strcat(terminal_response, " argumanlarla baslatildi.");
+                else strcat(terminal_response, " baslatildi.");
             } else {
-                free(app_memory); // Bulunamadıysa RAM'i hemen iade et
+                free(app_memory);
                 strcpy(terminal_response, "Hata: ");
-                strcat(terminal_response, cmd);
-                strcat(terminal_response, " dosyasi diskte bulunamadi.");
+                strcat(terminal_response, first_word);
+                strcat(terminal_response, " diskte bulunamadi.");
             }
         } else {
             strcpy(terminal_response, "Hata: Uygulama baslatmak icin yetersiz RAM!");
@@ -657,7 +667,7 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     if (magic != 0x2BADB002) return; 
     if (mb_info->flags & (1 << 12)) vesa_framebuffer = (unsigned int*)(unsigned int)mb_info->framebuffer_addr;
     init_paging((unsigned int)vesa_framebuffer); 
-    init_heap(); init_tasking(); create_task(background_task, 0);
+    init_heap(); init_tasking(); create_task(background_task, 0, "");
 
     if (vesa_framebuffer != 0) init_graphics(vesa_framebuffer, 1024, 768);
     init_timer(100);

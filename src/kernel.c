@@ -10,7 +10,7 @@
 #include "keyboard.h"
 #include "string.h"
 #include "disk.h"
-
+#include "sound.h"
 unsigned int* vesa_framebuffer;
 extern void outb(unsigned short port, unsigned char data);
 extern unsigned char inb(unsigned short port);
@@ -399,6 +399,27 @@ void execute_command(char* cmd) {
     else if (strcmp(cmd, "temizle") == 0) {
         terminal_line_count = 0; // Terminali gerçekten temizle!
         terminal_response[0] = '\0'; 
+    }
+    // ========================================================
+    // YENİ: DONANIMSAL SES (PC SPEAKER) KOMUTLARI
+    // ========================================================
+    else if (strcmp(first_word, "bip") == 0) {
+        beep();
+        strcpy(terminal_response, "Bip sesi calindi!");
+    }
+    else if (strcmp(first_word, "melodi") == 0) {
+        strcpy(terminal_response, "8-bit Nostalji Melodisi caliniyor...");
+        terminal_print(terminal_response); // Metni hemen ekrana bas
+        terminal_response[0] = '\0';       // Tamponu temizle ki iki kez basmasın
+        
+        // Efsanevi Super Mario Giriş Melodisi
+        play_sound(659); sleep(150); nosound(); sleep(50);  // Mi
+        play_sound(659); sleep(150); nosound(); sleep(150); // Mi
+        play_sound(659); sleep(150); nosound(); sleep(150); // Mi
+        play_sound(523); sleep(150); nosound(); sleep(50);  // Do
+        play_sound(659); sleep(150); nosound(); sleep(150); // Mi
+        play_sound(784); sleep(300); nosound(); sleep(300); // Sol (İnce)
+        play_sound(392); sleep(300); nosound(); sleep(300); // Sol (Kalın)
     }
     // ========================================================
     // DİNAMİK UYGULAMA YÜKLEYİCİ (DYNAMIC EXECUTION ENGINE)

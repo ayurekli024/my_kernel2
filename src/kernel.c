@@ -264,6 +264,9 @@ void draw_desktop(unsigned int desktop_bg) {
 
 void render_gui() {
     if (!force_redraw) return;
+    
+    // Eğer işletim sistemi 'Full Redraw' (1) istediyse tüm ekranı kirlet
+    if (force_redraw == 1) mark_screen_dirty(); 
     force_redraw = 0;
     
     draw_desktop(current_bg_color); 
@@ -285,70 +288,46 @@ void render_gui() {
         
         draw_window(&windows[w_idx]); 
         
+        // ==========================================
+        // YENİ: PENCERE İÇERİĞİ İÇİN BOUNDARY CLIPPING
+        // ==========================================
+        // Uygulamalar şekilleri veya yazıları pencerenin dışına taşıramaz!
+        set_clipping_rect(windows[w_idx].x + 2, windows[w_idx].y + 32, windows[w_idx].w - 4, windows[w_idx].h - 34);
+
         if (w_idx == 0) {
-            // Kaydırmalı Terminal Çıktılarını Alt Alta Çiz
             for (int line = 0; line < terminal_line_count; line++) {
                 draw_string(windows[0].x + 10, windows[0].y + 40 + (line * 16), terminal_lines[line], 0x00000000, 0xFFFFFFFF);
             }
-            // Komut Giriş Satırını (Arda>) En Alta Çiz
             draw_string(windows[0].x + 10, windows[0].y + windows[0].h - 25, user_input, 0x000000AA, 0xFFFFFFFF); 
         } 
         else if (w_idx == 1) {
-            // Sütun Başlıkları
+            // (Sistem Monitörü UI Kodları - BURAYI KESMEDEN AYNEN KORU)
             draw_string(windows[1].x + 10, windows[1].y + 40, "PID  DURUM   CPU%", 0x00000000, 0xFFFFFFFF);
             draw_rect(windows[1].x + 10, windows[1].y + 55, windows[1].w - 20, 2, 0x00BBBBBB);
 
             if (ready_queue != 0) {
-                // 1. Görevleri UI için geçici bir diziye topla
-                task_t* task_array[32]; // Maksimum 32 görev varsayımı
-                int task_count = 0;
-                task_t* curr = ready_queue;
-                do {
-                    if (task_count < 32) task_array[task_count++] = curr;
-                    curr = curr->next;
-                } while (curr != ready_queue);
-
-                // 2. Diziyi PID Numarasına Göre Sırala (Bubble Sort)
-                for (int i = 0; i < task_count - 1; i++) {
-                    for (int j = 0; j < task_count - i - 1; j++) {
+                task_t* task_array[32]; int task_count = 0; task_t* curr = ready_queue;
+                do { if (task_count < 32) task_array[task_count++] = curr; curr = curr->next; } while (curr != ready_queue);
+                for (int m = 0; m < task_count - 1; m++) {
+                    for (int j = 0; j < task_count - m - 1; j++) {
                         if (task_array[j]->id > task_array[j+1]->id) {
-                            task_t* temp = task_array[j];
-                            task_array[j] = task_array[j+1];
-                            task_array[j+1] = temp;
+                            task_t* temp = task_array[j]; task_array[j] = task_array[j+1]; task_array[j+1] = temp;
                         }
                     }
                 }
-
-                // 3. Ekrana Küçükten Büyüğe Sıralı Şekilde Çiz
                 int y_offset = 65;
-                for (int i = 0; i < task_count && y_offset < windows[1].h - 20; i++) {
-                    task_t* t = task_array[i];
-                    
-                    // 1. Görev ID'si (PID)
-                    char pid_str[4];
-                    itoa(t->id, pid_str);
+                for (int m = 0; m < task_count && y_offset < windows[1].h - 20; m++) {
+                    task_t* t = task_array[m];
+                    char pid_str[4]; itoa(t->id, pid_str);
                     draw_string(windows[1].x + 10, windows[1].y + y_offset, pid_str, 0x00000000, 0xFFFFFFFF);
-                    
-                    // 2. Durum Yazdır
                     const char* state_str = (t->state == 0) ? "RUN" : "BLK";
                     unsigned int state_color = (t->state == 0) ? 0x0000AA00 : 0x00AA0000;
                     draw_string(windows[1].x + 45, windows[1].y + y_offset, state_str, state_color, 0xFFFFFFFF);
-                    
-                    // 3. Yüzde Metni
-                    char usage_str[8];
-                    itoa(t->cpu_usage, usage_str);
-                    strcat(usage_str, "%");
+                    char usage_str[8]; itoa(t->cpu_usage, usage_str); strcat(usage_str, "%");
                     draw_string(windows[1].x + 100, windows[1].y + y_offset, usage_str, 0x00000000, 0xFFFFFFFF);
-                    
-                    // 4. CANLI GRAFİK BAR
                     unsigned int bar_color = (t->cpu_usage > 50) ? ((t->cpu_usage > 80) ? 0x00FF0000 : 0x00FFAA00) : 0x0000AA00;
-                    int bar_width = t->cpu_usage * 1.3; 
-                    if (bar_width > 130) bar_width = 130;  
-                    
-                    if (bar_width > 0) {
-                        draw_rect(windows[1].x + 150, windows[1].y + y_offset, bar_width, 10, bar_color);
-                    }
-
+                    int bar_width = t->cpu_usage * 1.3; if (bar_width > 130) bar_width = 130;  
+                    if (bar_width > 0) draw_rect(windows[1].x + 150, windows[1].y + y_offset, bar_width, 10, bar_color);
                     y_offset += 20;
                 }
             }
@@ -363,6 +342,9 @@ void render_gui() {
                           windows[w_idx].shape_color[s]);
             }
         }
+        
+        // Pencere içerik çizimi bitti, dışarıya taşma zırhını kaldır:
+        reset_clipping_rect();
     }
     draw_cursor(mouse_x, mouse_y);
     swap_buffers();
@@ -792,7 +774,9 @@ void process_mouse_events() {
     int delta_y = mouse_y - last_mouse_y;
 
     if (delta_x != 0 || delta_y != 0) {
-        force_redraw = 1;
+        
+        // YENİ: Sadece farenin 'Eski' konumunu kirlet (Silinmesi için)
+        add_dirty_rect(last_mouse_x, last_mouse_y, 16, 16);
 
         if (mouse_left_button) {
             if (!any_window_dragging) { 
@@ -812,19 +796,21 @@ void process_mouse_events() {
                 }
 
                 if (clicked_window != -1) {
-                    focused_window = clicked_window; 
+                    if (focused_window != clicked_window) {
+                        focused_window = clicked_window; 
+                        force_redraw = 1; // Z-Order değiştiği için Full Redraw iste!
+                    }
+
                     if (mouse_x >= windows[focused_window].x + windows[focused_window].w - 30 &&
                         mouse_x <= windows[focused_window].x + windows[focused_window].w &&
                         mouse_y >= windows[focused_window].y && mouse_y <= windows[focused_window].y + 30) {
                         
-                        // KIRMIZI X BUTONU MANTIĞI:
                         if (focused_window >= 2) {
-                            // Harici uygulamaysa görevi cellada devret
                             task_to_kill = windows[focused_window].owner_task_id;
                         } else {
-                            // Terminal (0) veya Monitor (1) ise sadece pencereyi gizle
                             windows[focused_window].is_open = 0;
                         }
+                        force_redraw = 1; // Ekrandan obje silindi, Full Redraw iste!
                     }
                     else if (mouse_y >= windows[focused_window].y && mouse_y <= windows[focused_window].y + 30) {
                         windows[focused_window].is_dragging = 1;
@@ -834,13 +820,26 @@ void process_mouse_events() {
             }
 
             if (any_window_dragging && windows[focused_window].is_dragging) {
+                // Sürükleme başladı! Pencerenin ESKİ konumunu kirlet
+                add_dirty_rect(windows[focused_window].x, windows[focused_window].y, windows[focused_window].w, windows[focused_window].h);
+                
                 windows[focused_window].x += delta_x;
                 windows[focused_window].y += delta_y;
+                
+                // Pencerenin YENİ konumunu kirlet
+                add_dirty_rect(windows[focused_window].x, windows[focused_window].y, windows[focused_window].w, windows[focused_window].h);
             }
         } else {
             for (int i = 0; i < MAX_WINDOWS; i++) windows[i].is_dragging = 0;
             any_window_dragging = 0;
         }
+        
+        // Farenin YENİ konumunu kirlet
+        add_dirty_rect(mouse_x, mouse_y, 16, 16);
+
+        // Sistemin Full Redraw'a (1) ihtiyacı yoksa, onu Fast Redraw'a (2) al
+        if (force_redraw == 0) force_redraw = 2; 
+        
         last_mouse_x = mouse_x; last_mouse_y = mouse_y;
     }
 }

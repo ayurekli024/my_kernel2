@@ -469,7 +469,14 @@ void execute_command(char* cmd) {
         strcpy(terminal_response, "Masaustu rengi kirmizi olarak degistirildi.");
     } 
     else if (strcmp(cmd, "help") == 0) {
-        strcpy(terminal_response, "KOMUTLAR:\n- help: Bu liste\n- info: Sistem detayi\n- temizle: Ekrani siler\n- renk [mavi/kirmizi]\n- memorytest: RAM saglik testi\n- uptime: Calisma suresi\n- saat: Donanim saati\n- yanki [mesaj]\n- hesapla [a + b]\n- ciz dikdortgen <x> <y> <w> <h> <renk>");
+        strcpy(terminal_response, 
+            "--- ARDAOS KOMUT LISTESI ---\n"
+            "[ SISTEM ] info, help, temizle, saat, uptime, ram, memorytest\n"
+            "[ GOREV  ] ps (Gorevleri listele), kill <PID>, <uygulama>.bin [arg]\n"
+            "[ DISK   ] ls (veya dir), yaz <DOSYA.UZT> <metin>, rm <DOSYA.UZT>, mkdir <AD>\n"
+            "[ GRAFIK ] renk <mavi/kirmizi>, ciz dikdortgen <x y w h rnk>, ciz temizle\n"
+            "[ DIGER  ] hesapla <a+b>, yanki <mesaj>, bip, melodi"
+        );
     }
     // ========================================================
     // YENİ: GÖREV YÖNETİCİSİ KOMUTLARI

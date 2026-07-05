@@ -6,6 +6,9 @@ ASMFLAGS = -f elf32
 LD = gcc
 LDFLAGS = -m32 -T linker.ld -nostdlib -no-pie
 
+# Harici uygulamalar için özel derleme bayrakları
+APP_CFLAGS = -m32 -ffreestanding -fno-pie -fno-stack-protector -nostdlib -mno-sse -mno-sse2 -mno-mmx
+
 # src klasöründeki tüm .c ve .asm dosyalarını otomatik bul
 C_SOURCES = $(wildcard src/*.c)
 ASM_SOURCES = $(wildcard src/*.asm)
@@ -16,7 +19,7 @@ OBJ = $(ASM_SOURCES:.asm=.o) $(C_SOURCES:.c=.o)
 TARGET = myos.bin
 ISO_TARGET = myos.iso
 
-all: $(ISO_TARGET)
+all: $(ISO_TARGET) disk
 
 # Her bir Assembly dosyasını derleme kuralı
 %.o: %.asm
@@ -38,11 +41,25 @@ $(ISO_TARGET): $(TARGET) grub.cfg
 	grub-mkrescue -o $(ISO_TARGET) isodir
 	rm -rf isodir
 
-# 3. Aşama: QEMU'yu CD-ROM modunda ISO ile başlat
-run: myos.iso
+# 3. Aşama: Harici Uygulamaları (SDK) Derleme
+yilan.bin: sdk/yilan.c
+	$(CC) $(APP_CFLAGS) -c sdk/yilan.c -o sdk/yilan.o
+	ld -m elf_i386 -T sdk/app.ld sdk/yilan.o -o yilan.bin
+
+okuyucu.bin: sdk/okuyucu.c
+	$(CC) $(APP_CFLAGS) -c sdk/okuyucu.c -o sdk/okuyucu.o
+	ld -m elf_i386 -T sdk/app.ld sdk/okuyucu.o -o okuyucu.bin
+
+# 4. Aşama: Uygulamaları FAT16 Diske (c.img) Enjekte Etme
+disk: yilan.bin okuyucu.bin
+	mcopy -o -i c.img yilan.bin ::/YILAN.BIN
+	mcopy -o -i c.img okuyucu.bin ::/OKUYUCU.BIN
+
+# 5. Aşama: QEMU'yu başlat (Başlamadan önce ISO ve disk otomatik güncellenir)
+run: $(ISO_TARGET) disk
 	qemu-system-i386 -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 -cdrom myos.iso -drive file=c.img,format=raw -boot d
 
-# Temizlik (ISO ve isodir temizliği eklendi)
+# Temizlik
 clean:
-	rm -f src/*.o $(TARGET) $(ISO_TARGET)
+	rm -f src/*.o sdk/*.o $(TARGET) $(ISO_TARGET) yilan.bin okuyucu.bin
 	rm -rf isodir

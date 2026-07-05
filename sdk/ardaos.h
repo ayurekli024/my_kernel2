@@ -25,5 +25,10 @@ static inline int sys_read_file(const char* name, const char* ext, unsigned char
     __asm__ __volatile__ ("int $0x80" : "=a"(ret) : "a"(11), "b"((unsigned int)name), "c"((unsigned int)ext), "d"((unsigned int)buffer));
     return ret;
 }
+static inline char sys_poll_key() { 
+    int key; 
+    __asm__ __volatile__ ("int $0x80" : "=a"(key) : "a"(13)); 
+    return (char)key; 
+}
 static inline void sys_print(const char* text) { __asm__ __volatile__ ("int $0x80" : : "a"(12), "b"((unsigned int)text)); }
 #endif

@@ -60,6 +60,10 @@ extern void yield_handler(void);
 
 // Mavi Ekran (BSOD) Motoru
 void fault_handler(int int_no, int err_code) {
+    extern void reset_clipping_rect(void);
+    extern void mark_screen_dirty(void);
+    reset_clipping_rect();
+    mark_screen_dirty();
     draw_rect(0, 0, 1024, 768, 0x000000AA);
     draw_string(50, 50, "FATAL ERROR: KERNEL PANIC", 0x00FFFFFF, 0x000000AA);
     draw_string(50, 80, "Isletim sisteminiz kritik bir hatayla karsilasti ve durduruldu.", 0x00FFFFFF, 0x000000AA);
@@ -187,6 +191,11 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         extern void api_print(const char*);
         api_print((const char*)arg1);
         return 1;
+    }
+    // API No 13: Asenkron Tuş Okuma (Oyunlar için)
+    else if (sys_num == 13) {
+        extern int api_poll_key(void);
+        return api_poll_key();
     }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
     return -1;

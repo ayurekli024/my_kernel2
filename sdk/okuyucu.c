@@ -1,9 +1,10 @@
 #include "ardaos.h"
 
-char read_buffer[513];
-
 __attribute__((section(".text.entry")))
-void _start(char* args) {  // YENİ: Çekirdek buraya gizlice parametreyi yollayacak!
+void _start(char* args) {  
+    // YENİ: Okuma tamponu (Buffer) Stack'e alındı! Artık kernel belleğine saldıramaz.
+    char read_buffer[513];
+
     char f_name[9] = "SKOR    "; // Parametre yoksa Varsayılan İsim
     char f_ext[4]  = "TXT";      // Varsayılan Uzantı
     
@@ -45,4 +46,4 @@ void _start(char* args) {  // YENİ: Çekirdek buraya gizlice parametreyi yollay
     for (volatile int i = 0; i < 5000000; i++) { sys_yield(); }
     sys_exit();
     while(1);
-}       
+}

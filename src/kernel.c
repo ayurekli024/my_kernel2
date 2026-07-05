@@ -162,6 +162,17 @@ int api_get_key() {
     }
     return 0; 
 }
+// MULTITASKING API: Görevi UYUTMADAN (Asenkron) tuşu okur (Oyunlar için)
+int api_poll_key() {
+    if (focused_window >= 2 && windows[focused_window].is_open) {
+        if (windows[focused_window].owner_task_id == current_task->id) {
+            char k = last_game_key;
+            last_game_key = 0;
+            return k; // Tuş yoksa bile 0 döndür ama UYUTMA!
+        }
+    }
+    return 0; 
+}
 // MULTITASKING API: Harici uygulamanın güvenli şekilde dosya yazması
 int api_write_file(const char* name, const char* ext, unsigned char* buffer) {
     unsigned int base = current_task->app_base;

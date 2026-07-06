@@ -1,6 +1,6 @@
 MBOOT_PAGE_ALIGN    equ 1 << 0
 MBOOT_MEM_INFO      equ 1 << 1
-MBOOT_VIDEO_MODE    equ 1 << 2   ; YENİ: Grafik Modu İstek Bayrağı
+MBOOT_VIDEO_MODE    equ 1 << 2   
 MBOOT_HEADER_MAGIC  equ 0x1BADB002
 MBOOT_HEADER_FLAGS  equ MBOOT_PAGE_ALIGN | MBOOT_MEM_INFO | MBOOT_VIDEO_MODE
 MBOOT_CHECKSUM      equ -(MBOOT_HEADER_MAGIC + MBOOT_HEADER_FLAGS)
@@ -18,13 +18,12 @@ align 4
     dd 0
     dd 0
     
-    ; YENİ: VBE (Video BIOS Extension) Grafik Modu İstekleri
+    ; VBE (Video BIOS Extension) Grafik Modu İstekleri
     dd 0        ; 0 = Lineer Grafik Modu (Piksellere sırayla erişim)
     dd 1024     ; Genişlik
     dd 768      ; Yükseklik
     dd 32       ; Renk Derinliği (32-bit True Color: ARGB)
 
-; --- BURADAN SONRASI AYNEN KALACAK (section .bss vb.) ---
 section .bss
 align 16
 stack_bottom:
@@ -33,9 +32,10 @@ stack_top:
 
 section .text
 global _start
-global keyboard_handler      ; Dışarıya açıyoruz ki C kodu görebilsin
+global keyboard_handler      
 extern kernel_main
-extern keyboard_handler_main ; C'deki fonksiyonumuz
+extern keyboard_handler_main 
+extern update_tss_esp0       ; YENİ: TSS güncelleyici C fonksiyonumuz
 
 _start:
     ; Yığın alanını ayarla
@@ -55,20 +55,20 @@ _start:
 
 ; --- KLAVYE KESMESİ (IRQ1) ---
 global keyboard_handler
-extern keyboard_handler_main
 
 keyboard_handler:
     cli
     pusha
     call keyboard_handler_main
     
-    ; YENİ: Anakarttaki PIC'e "İşlem Bitti" (EOI) onayını kesinlikle göndermeliyiz!
+    ; Anakarttaki PIC'e "İşlem Bitti" (EOI) onayını gönder
     mov al, 0x20
     out 0x20, al
     
     popa
     iretd
-    ; --- SAYFALAMA (PAGING) AKTİFLEŞTİRİCİ ---
+
+; --- SAYFALAMA (PAGING) AKTİFLEŞTİRİCİ ---
 global enable_paging
 
 enable_paging:
@@ -88,13 +88,14 @@ enable_paging:
     
     pop ebp
     ret
+
 ; --- DONANIM SAATİ (PIT - IRQ0) KESMESİ VE ZAMANLAYICI ---
 global timer_handler
 extern timer_handler_main
-extern current_task  ; task.c'den gelen görev yöneticisi
+extern current_task  
 
 timer_handler:
-    pusha  ; O anki görevin (Task) durumunu kaydet
+    pusha  
     
     ; Anakarttaki PIC'e "Saati okudum" onayı (EOI) gönder
     mov al, 0x20
@@ -107,7 +108,7 @@ timer_handler:
     ; PREEMPTIVE MULTITASKING: UYUYANLARI ATLAYAN SCHEDULER
     ; ====================================================
     mov eax, [current_task]
-    cmp eax, 0          ; Görev sistemi henüz başlamadıysa atla
+    cmp eax, 0          
     je .no_timer_switch
     
     ; 1. Eski görevin yığınını (ESP) kaydet
@@ -115,25 +116,31 @@ timer_handler:
 
 .timer_find_next_task:
     ; 2. Sıradaki göreve geç: current_task = current_task->next
-    mov ebx, [eax + 16] ; 16. byte, "next" pointer'ıdır
+    mov ebx, [eax + 16] 
     mov [current_task], ebx
     
     ; 3. Sıradaki görevin State (Durum) değerini kontrol et (state = +20)
     mov ecx, [ebx + 20]
-    cmp ecx, 1              ; Görev BLOCKED (Uyuyor) mu?
-    je .timer_skip_sleeping ; Uyuyorsa hiç bulaşma, atla!
+    cmp ecx, 1              
+    je .timer_skip_sleeping 
     
+    ; YENİ KORUMA: Sıradaki görev uyanıksa, Çekirdek Yığınını (ESP0) TSS'ye bildir!
+    pusha
+    call update_tss_esp0
+    popa
+
     ; 4. Görev uyanıksa (0), yeni görevin yığınını (ESP) işlemciye yükle
     mov esp, [ebx]      
     jmp .no_timer_switch
 
 .timer_skip_sleeping:
-    mov eax, ebx            ; Uyuyan görevi 'eax' yap ve bir sonrakini aramaya devam et
+    mov eax, ebx            
     jmp .timer_find_next_task
 
 .no_timer_switch:
-    popa   ; Yüklenen yeni yığındaki değerleri yazmaçlara dök
-    iretd  ; Yeni göreve zıpla!
+    popa   
+    iretd  
+
 ; --- İSTİSNA (EXCEPTION) YAKALAYICILARI ---
 global isr0
 global isr6
@@ -149,45 +156,43 @@ extern fault_handler
 global isr_default_ex
 isr_default_ex:
     cli
-    push 0              ; Sahte hata kodu
-    push 255            ; 255'i "Bilinmeyen CPU İstisnası" olarak etiketliyoruz
+    push 0              
+    push 255            
     jmp isr_common
 
-; Spesifik CPU İstisnaları
 global isr0
 isr0:
     cli
-    push 0              ; Sahte hata kodu
-    push 0              ; Kesme Numarası
+    push 0              
+    push 0              
     jmp isr_common
 
 global isr8
 isr8:
     cli
-    push 8              ; CPU zaten hata kodunu itti, biz sadece 8'i itiyoruz
+    push 8              
     jmp isr_common
 
 global isr13
 isr13:
     cli
-    push 13             ; CPU zaten hata kodunu itti, biz sadece 13'ü itiyoruz
+    push 13             
     jmp isr_common
 
 global isr14
 isr14:
     cli
-    push 14             ; CPU zaten hata kodunu itti, biz sadece 14'ü itiyoruz
+    push 14             
     jmp isr_common
 
 ; --- MERKEZİ MAVİ EKRAN YÖNLENDİRİCİSİ (SSE KORUMALI) ---
-extern fault_handler
 isr_common:
     ; Yığını (Stack) GCC'nin çökmeyeceği şekilde 16-bayta hizala
     push ebp
     mov ebp, esp
     and esp, 0xFFFFFFF0 
     
-    sub esp, 8           ; Hizalamayi korumak icin 8 bayt bosluk birak
+    sub esp, 8           
     
     ; C Fonksiyonu için argümanları it (Sağdan Sola)
     push dword [ebp+8]   ; err_code
@@ -195,7 +200,7 @@ isr_common:
     
     call fault_handler   ; Mavi ekrana git!
     
-    ; Buradan sonrası çalışmaz çünkü sistem kilitlenecek ama kurallara uyalım
+    ; Buradan sonrası çalışmaz
     mov esp, ebp
     pop ebp
     add esp, 8
@@ -212,10 +217,11 @@ isr_default_int:
     cli
     pusha
     mov al, 0x20
-    out 0x20, al        ; Master PIC'e onay gönder
-    out 0xA0, al        ; Slave PIC'e onay gönder
+    out 0x20, al        
+    out 0xA0, al        
     popa
     iretd
+
 ; --- FARE (PS/2 MOUSE) KESME SARMALAYICISI ---
 global mouse_handler
 extern mouse_handler_main
@@ -224,13 +230,14 @@ mouse_handler:
     pusha
     call mouse_handler_main
     
-    ; Master ve Slave PIC'e (Programmable Interrupt Controller) EOI (İşlem Bitti) sinyali gönder
+    ; Master ve Slave PIC'e EOI sinyali gönder
     mov al, 0x20
     out 0xA0, al 
     out 0x20, al 
     
     popa
     iretd
+
 ; --- GDT HARİTA YÜKLEYİCİSİ ---
 global gdt_flush
 gdt_flush:
@@ -251,6 +258,17 @@ gdt_flush:
     ret
 
 ; =================================================================
+; YENİ: TSS (GÖREV DURUM SEGMENTİ) YÜKLEYİCİSİ
+; =================================================================
+global tss_flush
+tss_flush:
+    ; GDT'deki 5. kapımız TSS kapısıdır. (Index 5 * 8 bayt = 40 = 0x28)
+    ; Ring 3 yetkisiyle (RPL 3) çağrılacağı için: 0x28 | 3 = 0x2B
+    mov ax, 0x2B 
+    ltr ax       ; Load Task Register (TSS'yi işlemciye yükle)
+    ret
+
+; =================================================================
 ; 3. SİSTEM ÇAĞRILARI (SYSCALLS - INT 0x80)
 ; =================================================================
 global syscall_handler
@@ -261,7 +279,6 @@ syscall_handler:
     pusha               ; Uygulamanın o anki tüm CPU yazmaçlarını yığına kaydet
 
     ; CDECL Standardı: C fonksiyonuna parametreleri sağdan sola itiyoruz!
-    ; Uygulamanın doldurduğu yazmaçları alıp C fonksiyonuna argüman yapıyoruz:
     push edi            ; arg5
     push esi            ; arg4
     push edx            ; arg3
@@ -270,21 +287,18 @@ syscall_handler:
     push eax            ; sys_num (Çağrılmak istenen API numarası)
     
     call syscall_handler_main
-    add esp, 24         ; 6 parametre x 4 bayt = 24 baytlık yığını temizle
+    add esp, 24         ; Yığını temizle
     
-    ; Sihirli Dokunuş: C fonksiyonundan dönen (return) sonuç EAX yazmacındadır.
-    ; Biz de bu sonucu, pusha ile kaydedilmiş eski EAX'in üzerine yazıyoruz ki 
-    ; uygulama cevabı okuyarabilsin! (pusha diziliminde EAX 28 bayt yukarıdadır)
+    ; C fonksiyonundan dönen sonucu eski EAX'in üzerine yazıyoruz
     mov [esp + 28], eax 
     
-    popa                ; Yazmaçları eski haline getir (Yeni EAX ile birlikte)
-    iretd               ; Uygulamaya geri dön
+    popa                
+    iretd               
 
 ; ====================================================
 ; MANUEL GÖREV DEĞİŞTİRİCİ VE SCHEDULER ZEKA KÜPÜ
 ; ====================================================
 global yield_handler
-extern current_task
 
 yield_handler:
     pusha               
@@ -303,15 +317,20 @@ yield_handler:
     
     ; 3. Sıradaki görevin State (Durum) değerini kontrol et (state = +20)
     mov ecx, [ebx + 20]
-    cmp ecx, 1          ; Görev BLOCKED (Uyuyor) mu?
-    je .skip_sleeping   ; Uyuyorsa atla!
+    cmp ecx, 1          
+    je .skip_sleeping   
     
+    ; YENİ KORUMA: Sıradaki görev uyanıksa, Çekirdek Yığınını (ESP0) TSS'ye bildir!
+    pusha
+    call update_tss_esp0
+    popa
+
     ; 4. Görev uyanıksa (0), ESP'yi yükle ve çalıştır
     mov esp, [ebx]      
     jmp .no_yield_switch
 
 .skip_sleeping:
-    mov eax, ebx        ; Uyuyan görevi 'eax' yap ve aramaya devam et
+    mov eax, ebx        
     jmp .find_next_task
 
 .no_yield_switch:

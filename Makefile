@@ -49,11 +49,15 @@ yilan.bin: sdk/yilan.c
 okuyucu.bin: sdk/okuyucu.c
 	$(CC) $(APP_CFLAGS) -c sdk/okuyucu.c -o sdk/okuyucu.o
 	ld -m elf_i386 -T sdk/app.ld sdk/okuyucu.o -o okuyucu.bin
+bomba.bin: sdk/bomba.c
+	$(CC) $(APP_CFLAGS) -c sdk/bomba.c -o sdk/bomba.o
+	ld -m elf_i386 -T sdk/app.ld sdk/bomba.o -o bomba.bin
 
 # 4. Aşama: Uygulamaları FAT16 Diske (c.img) Enjekte Etme
-disk: yilan.bin okuyucu.bin
+disk: yilan.bin okuyucu.bin bomba.bin
 	mcopy -o -i c.img yilan.bin ::/YILAN.BIN
 	mcopy -o -i c.img okuyucu.bin ::/OKUYUCU.BIN
+	mcopy -o -i c.img bomba.bin ::/BOMBA.BIN
 
 # 5. Aşama: QEMU'yu başlat (Başlamadan önce ISO ve disk otomatik güncellenir)
 run: $(ISO_TARGET) disk
@@ -61,5 +65,5 @@ run: $(ISO_TARGET) disk
 
 # Temizlik
 clean:
-	rm -f src/*.o sdk/*.o $(TARGET) $(ISO_TARGET) yilan.bin okuyucu.bin
+	rm -f src/*.o sdk/*.o $(TARGET) $(ISO_TARGET) yilan.bin okuyucu.bin bomba.bin
 	rm -rf isodir

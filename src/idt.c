@@ -1,7 +1,7 @@
 #include "idt.h"
 #include "io.h"
 #include "graphics.h" // En üste eklemeyi unutma!
-
+#include "task.h"
 
 struct IDT_entry {
     unsigned short offset_lowerbits; unsigned short selector;
@@ -36,7 +36,6 @@ void pic_remap(void) {
     outb(0xA1, 0xEF); 
 }
 // ... (Üst kısımdaki pic_remap ve struct tanımları aynı kalacak) ...
-extern void yield(void);
 extern void api_add_shape(int x, int y, int w, int h, unsigned int color);
 extern char last_game_key;
 extern void api_clear_shapes(void);
@@ -58,8 +57,33 @@ extern void timer_handler(void);
 extern void syscall_handler(void);
 extern void yield_handler(void);
 
+extern task_t* current_task;
+extern int task_to_kill;
+extern void terminal_print(const char* text);
+extern void yield(void);
 // Mavi Ekran (BSOD) Motoru
 void fault_handler(int int_no, int err_code) {
+    (void)err_code;
+    // ========================================================
+    // YENİ: ZEKİ CELLAT (RING 3 KORUMASI)
+    // ========================================================
+    // Eğer çöken görev Kernel (0) veya System (1) değilse (Yani harici bir uygulamaysa)
+    if (current_task != 0 && current_task->id >= 2) {
+        
+        if (int_no == 14) terminal_print("[ GUVENLIK ] Engellendi! Uygulama Kernel'e saldirdi (Page Fault).");
+        else if (int_no == 13) terminal_print("[ GUVENLIK ] Engellendi! Yetkisiz donanim erisimi (GPF).");
+        else terminal_print("[ GUVENLIK ] Uygulama kural ihlali yapti ve sonlandirildi!");
+
+        // Görevi ana döngüdeki Cellat motoruna devret (Penceresi ve RAM'i silinecek)
+        task_to_kill = current_task->id; 
+        current_task->state = 1; 
+        
+        // Kazayla dönerse diye işlemciyi yormayan sonsuz bir karantina döngüsü
+        while(1) {
+            yield(); 
+        }
+        return; // İşlemci asla buraya ulaşmaz ama C dili kuralları gereği koyuyoruz
+    }
     extern void reset_clipping_rect(void);
     extern void mark_screen_dirty(void);
     reset_clipping_rect();
@@ -121,8 +145,9 @@ void init_idt(void) {
     // Kendi yazdığımız donanım sürücüleri
     idt_set_gate(33, (unsigned long)keyboard_handler, 0x08, 0x8E);
     idt_set_gate(44, (unsigned long)mouse_handler, 0x08, 0x8E);
-    idt_set_gate(128, (unsigned long)syscall_handler, 0x08, 0x8E);
-    idt_set_gate(129, (unsigned long)yield_handler, 0x08, 0x8E); // Manuel Görev Değişimi
+    // YENİ: DPL 3 (0xEE) ile bu kesmeleri Ring 3 (Kullanıcı) moduna açıyoruz!
+    idt_set_gate(128, (unsigned long)syscall_handler, 0x08, 0xEE); 
+    idt_set_gate(129, (unsigned long)yield_handler, 0x08, 0xEE);
     __asm__ __volatile__ ("lidt %0" : : "m" (idt_ptr));
 }
 // ==========================================

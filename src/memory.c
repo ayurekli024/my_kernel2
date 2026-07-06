@@ -43,30 +43,42 @@ unsigned int vbe_page_tables[4][1024] __attribute__((aligned(4096)));
 extern void enable_paging(unsigned int page_dir_address);
 
 void init_paging(unsigned int framebuffer_addr) {
-    // Tüm dizini temizle
     for(int i = 0; i < 1024; i++) page_directory[i] = 0x00000002;
     
     // 1. Tablo: İlk 4 MB'lık alan (0x00000000 - 0x003FFFFF)
-    for(unsigned int i = 0; i < 1024; i++) first_page_table[i] = (i * 4096) | 3;
-    for(unsigned int i = 0; i < 1024; i++) second_page_table[i] = (0x400000 + (i * 4096)) | 3; // 4 MB ile 8 MB arası
+    for(unsigned int i = 0; i < 1024; i++) {
+        if (i < 256) {
+            // İlk 1 MB: Kernel Kod ve Verileri (Zırhlı - Ring 0)
+            first_page_table[i] = (i * 4096) | 3;
+        } else {
+            // 1 MB - 4 MB: Heap (malloc) Alanı (Halka Açık - Ring 3)
+            first_page_table[i] = (i * 4096) | 7;
+        }
+    }
 
-    page_directory[0] = ((unsigned int)first_page_table) | 3;
-    page_directory[1] = ((unsigned int)second_page_table) | 3; // Çekirdeğe 8 MB yer açtık!
+    // YENİ/DÜZELTME: İkinci tabloyu (4-8 MB) doldurmayı unutmuşuz! Heap buraya taşıyor.
+    for(unsigned int i = 0; i < 1024; i++) {
+        second_page_table[i] = (0x400000 + (i * 4096)) | 7;
+    }
+
+    // DÜZELTME 2: Ana Klasörlere (Directory) Kullanıcı izni (| 7) veriyoruz ki, 
+    // içerideki User (| 7) ve Kernel (| 3) ayrımı geçerli olabilsin!
+    page_directory[0] = ((unsigned int)first_page_table) | 7; 
+    page_directory[1] = ((unsigned int)second_page_table) | 7; 
     
-    // --- Geri kalan Ekran Kartı (VBE) haritalama kodun AYNEN KALACAK ---
+    // ... (Aşağıdaki framebuffer_addr kodları aynen kalacak) ...
+    
     if (framebuffer_addr != 0) {
         unsigned int pd_index = framebuffer_addr >> 22;
-        if (pd_index > 1) { // Çekirdeği ezmemek için
+        if (pd_index > 1) { 
             for (int t = 0; t < 4; t++) { 
                 unsigned int block_start = (pd_index + t) << 22; 
-                for(int i = 0; i < 1024; i++) {
-                    vbe_page_tables[t][i] = (block_start + (i * 4096)) | 3; 
-                }
-                page_directory[pd_index + t] = ((unsigned int)vbe_page_tables[t]) | 3;
+                // YENİ: Ekrana çizim yapabilmeleri için VBE sayfalarını da Kullanıcıya açıyoruz (| 7)
+                for(int i = 0; i < 1024; i++) vbe_page_tables[t][i] = (block_start + (i * 4096)) | 7; 
+                page_directory[pd_index + t] = ((unsigned int)vbe_page_tables[t]) | 7;
             }
         }
     }
-    
     enable_paging((unsigned int)page_directory);
 }
 // ============================================================================

@@ -4,7 +4,12 @@
 task_t* current_task;
 task_t* ready_queue;
 int next_pid = 1;
-
+extern void set_kernel_stack(unsigned int stack);
+void update_tss_esp0() {
+    if (current_task != 0) {
+        set_kernel_stack(current_task->stack_base + 4096);
+    }
+}
 void init_tasking() {
     current_task = (task_t*)malloc(sizeof(task_t));
     current_task->id = 0;
@@ -40,19 +45,36 @@ int create_task(void (*func)(void), unsigned int app_base, char* args) {
         stack_top_addr &= ~3;                // Stack'i GCC'nin sevdiği gibi 4 bayta hizala
     }
     
+    // ...
     unsigned int* stack_top = (unsigned int*)stack_top_addr;
     
-    // =========================================================
-    // 2. CDECL STANDARDI: PARAMETRE VE DÖNÜŞ ADRESİ
-    // =========================================================
-    *(--stack_top) = (unsigned int)target_args; // [ESP + 4]: 1. Argüman (char* args)
-    *(--stack_top) = 0x00000000;                // [ESP + 0]: Sahte Dönüş Adresi (sys_exit çağırmazsa çöker)
+    // CDECL STANDARDI: PARAMETRE VE DÖNÜŞ ADRESİ
+    *(--stack_top) = (unsigned int)target_args; 
+    *(--stack_top) = 0x00000000;                
     
-    // --- KUSURSUZ ZIRH: SAHTE DONANIM KESMESİ (FORGED IRET FRAME) ---
-    *(--stack_top) = 0x202; // EFLAGS
-    *(--stack_top) = 0x08;  // CS
-    *(--stack_top) = (unsigned int)func; // EIP (Fonksiyon adresi)
+    // Hangi yetki seviyesinde olduğumuzu anla
+    int is_user = (app_base != 0); // Arka plan sayacı (0) hariç herkes Ring 3'e düşecek!
+
+    if (is_user) {
+        // --- RING 3 (KULLANICI MODU) SAHTE IRET ÇERÇEVESİ ---
+        *(--stack_top) = 0x23; // User SS
+        
+        // YENİ: Uygulamaya kendi 4KB'lık bloğunun alt 3KB'ını veriyoruz, üst 1KB Çekirdeğe kalıyor!
+        *(--stack_top) = new_task->stack_base + 3072; 
+        
+        *(--stack_top) = 0x202; // EFLAGS
+        *(--stack_top) = 0x1B; // User CS
+        *(--stack_top) = (unsigned int)func; // EIP
+    } else {
+        // --- RING 0 (ÇEKİRDEK MODU) SAHTE IRET ÇERÇEVESİ ---
+        // İşlemci Ring 0'da kalacağı için Stack değişmez, 3 parametre bekler.
+        *(--stack_top) = 0x202; // EFLAGS
+        *(--stack_top) = 0x08;  // Kernel CS
+        *(--stack_top) = (unsigned int)func; // EIP
+    }
     
+    // --- PUSHA FRAME (8 Yazmaç) ---
+    // ... (Aşağıdaki pusha frame aynı kalacak)
     // --- PUSHA FRAME (8 Yazmaç) ---
     *(--stack_top) = 0; // EAX
     *(--stack_top) = 0; // ECX

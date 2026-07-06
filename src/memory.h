@@ -20,5 +20,5 @@ extern unsigned int total_used_memory;
 void init_heap();
 void* malloc(unsigned int size);
 void free(void* ptr);
-
+void* api_get_shared_memory(void);
 #endif // MEMORY_H bitişinin hemen üstünde olduğundan emin ol

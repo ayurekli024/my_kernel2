@@ -31,4 +31,10 @@ static inline char sys_poll_key() {
     return (char)key; 
 }
 static inline void sys_print(const char* text) { __asm__ __volatile__ ("int $0x80" : : "a"(12), "b"((unsigned int)text)); }
+// YENİ: IPC - Ortak Toplantı Odasının (Shared Memory) Anahtarını Al
+static inline void* sys_shm_get() {
+    void* shm_ptr;
+    __asm__ __volatile__ ("int $0x80" : "=a"(shm_ptr) : "a"(14));
+    return shm_ptr;
+}
 #endif

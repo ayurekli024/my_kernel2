@@ -2,48 +2,42 @@
 
 __attribute__((section(".text.entry")))
 void _start(char* args) {  
-    // YENİ: Okuma tamponu (Buffer) Stack'e alındı! Artık kernel belleğine saldıramaz.
-    char read_buffer[513];
-
-    char f_name[9] = "SKOR    "; // Parametre yoksa Varsayılan İsim
-    char f_ext[4]  = "TXT";      // Varsayılan Uzantı
+    // YENİ: IPC - Paylaşılan belleğe bağlan (yilan.bin ile aynı adrese bakar)
+    volatile char* shared_mem = (volatile char*)sys_shm_get();
     
-    // Eğer terminalden bir argüman girildiyse (Örn: "TEST.TXT")
-    if (args != 0 && args[0] != '\0') {
-        for(int i = 0; i < 8; i++) f_name[i] = ' '; // İçini temizle
-        for(int i = 0; i < 3; i++) f_ext[i] = ' ';
+    // Sadece skor değiştiğinde ekrana yazmak için eski skoru hafızada tutuyoruz
+    char last_score[4] = "XX"; 
+    
+    sys_print("[ SKORBORD ] Yilan oyunu skoru canli dinleniyor...");
+    sys_print("[ SKORBORD ] Cikmak icin terminale odaklanip 'q' tusuna basin.");
+
+    while(1) {
+        // Eğer skorda bir değişiklik varsa (Yılan yem yemişse)
+        if (shared_mem[0] != '\0' && (shared_mem[0] != last_score[0] || shared_mem[1] != last_score[1])) {
+            
+            // Yeni skoru hafızaya al
+            last_score[0] = shared_mem[0];
+            last_score[1] = shared_mem[1];
+            last_score[2] = '\0';
+            
+            // Ekrana basılacak metni (String) birleştir
+            char msg[64] = "--> Yilan Yem Yedi! Guncel Skor: ";
+            int i = 0; while(msg[i] != '\0') i++;
+            int j = 0; while(last_score[j] != '\0') msg[i++] = last_score[j++];
+            msg[i] = '\0';
+            
+            // Terminale yazdır
+            sys_print(msg);
+        }
         
-        int i = 0, j = 0;
-        // Noktaya kadar olan kısmı f_name içine al ve büyük harfe çevir
-        while(args[i] != '.' && args[i] != '\0' && j < 8) {
-            char c = args[i++];
-            if (c >= 'a' && c <= 'z') c -= 32; 
-            f_name[j++] = c;
-        }
-        if (args[i] == '.') {
-            i++; 
-            j = 0;
-            // Noktadan sonrasını f_ext içine al
-            while(args[i] != '\0' && j < 3) {
-                char c = args[i++];
-                if (c >= 'a' && c <= 'z') c -= 32;
-                f_ext[j++] = c;
-            }
-        }
-        f_name[8] = '\0'; f_ext[3] = '\0';
-    }
-
-    // ARTIK DOSYAYI DİNAMİK OLARAK OKUYORUZ!
-    int file_size = sys_read_file(f_name, f_ext, (unsigned char*)read_buffer);
-    
-    if (file_size > 0) {
-        read_buffer[file_size < 512 ? file_size : 512] = '\0'; 
-        sys_print(read_buffer);
-    } else {
-        sys_print("HATA: Belirtilen dosya diskte bulunamadi!");
+        // İşlemciyi yormamak ve diğer uygulamalara vakit tanımak için biraz bekle
+        sys_yield();
+        
+        // q tuşuna basılırsa döngüyü kır ve uygulamayı kapat
+        if (sys_poll_key() == 'q') break;
     }
     
-    for (volatile int i = 0; i < 5000000; i++) { sys_yield(); }
+    sys_print("[ SKORBORD ] Dinleme sonlandirildi.");
     sys_exit();
     while(1);
 }

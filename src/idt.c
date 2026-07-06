@@ -70,7 +70,23 @@ void fault_handler(int int_no, int err_code) {
     // Eğer çöken görev Kernel (0) veya System (1) değilse (Yani harici bir uygulamaysa)
     if (current_task != 0 && current_task->id >= 2) {
         
-        if (int_no == 14) terminal_print("[ GUVENLIK ] Engellendi! Uygulama Kernel'e saldirdi (Page Fault).");
+        if (int_no == 14) {
+            terminal_print("[ GUVENLIK ] Engellendi! Uygulama Kernel'e saldirdi (Page Fault).");
+            
+            // Çökmeye sebep olan geçersiz bellek adresini (CR2) işlemciden al
+            unsigned int cr2_addr;
+            __asm__ __volatile__ ("mov %%cr2, %0" : "=r" (cr2_addr));
+            
+            // Adresi Hex (0x...) formatında ekrana bas
+            char hex_str[64] = "[ HATA DETAYI ] Adres: 0x";
+            char hex_chars[] = "0123456789ABCDEF";
+            int idx = 25;
+            for (int i = 28; i >= 0; i -= 4) {
+                hex_str[idx++] = hex_chars[(cr2_addr >> i) & 0x0F];
+            }
+            hex_str[idx] = '\0';
+            terminal_print(hex_str);
+        }
         else if (int_no == 13) terminal_print("[ GUVENLIK ] Engellendi! Yetkisiz donanim erisimi (GPF).");
         else terminal_print("[ GUVENLIK ] Uygulama kural ihlali yapti ve sonlandirildi!");
 
@@ -221,6 +237,11 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
     else if (sys_num == 13) {
         extern int api_poll_key(void);
         return api_poll_key();
+    }
+    // YENİ - API No 14: Paylaşılan Bellek (Shared Memory) İsteği
+    else if (sys_num == 14) {
+        extern void* api_get_shared_memory(void);
+        return (unsigned int)api_get_shared_memory();
     }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
     return -1;

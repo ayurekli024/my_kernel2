@@ -32,12 +32,14 @@ void pmm_free_block(void* physical_address) {
     bitmap_clear((unsigned int)physical_address / BLOCK_SIZE);
 }
 
-// memory.c içindeki mevcut tanımlar
+// ============================================================================
+// SAYFALAMA (PAGING) TABLOLARI
+// ============================================================================
 unsigned int page_directory[1024] __attribute__((aligned(4096)));
 unsigned int first_page_table[1024] __attribute__((aligned(4096)));
-
-// YENİ: Çekirdek kodları ve fontlar büyüdüğü için 2. bir çekirdek sayfa tablosu ekliyoruz
 unsigned int second_page_table[1024] __attribute__((aligned(4096)));
+// YENİ: IPC için 3. Tablo (Kusursuz Hizalama)
+unsigned int third_page_table[1024] __attribute__((aligned(4096))); 
 
 unsigned int vbe_page_tables[4][1024] __attribute__((aligned(4096)));
 extern void enable_paging(unsigned int page_dir_address);
@@ -45,41 +47,43 @@ extern void enable_paging(unsigned int page_dir_address);
 void init_paging(unsigned int framebuffer_addr) {
     for(int i = 0; i < 1024; i++) page_directory[i] = 0x00000002;
     
-    // 1. Tablo: İlk 4 MB'lık alan (0x00000000 - 0x003FFFFF)
+    // 1. Tablo (0 - 4 MB)
     for(unsigned int i = 0; i < 1024; i++) {
-        if (i < 256) {
-            // İlk 1 MB: Kernel Kod ve Verileri (Zırhlı - Ring 0)
-            first_page_table[i] = (i * 4096) | 3;
-        } else {
-            // 1 MB - 4 MB: Heap (malloc) Alanı (Halka Açık - Ring 3)
-            first_page_table[i] = (i * 4096) | 7;
-        }
+        if (i < 256) first_page_table[i] = (i * 4096) | 3; // Kernel
+        else first_page_table[i] = (i * 4096) | 7;         // Heap Başlangıcı
     }
 
-    // YENİ/DÜZELTME: İkinci tabloyu (4-8 MB) doldurmayı unutmuşuz! Heap buraya taşıyor.
+    // 2. Tablo (4 - 8 MB)
     for(unsigned int i = 0; i < 1024; i++) {
         second_page_table[i] = (0x400000 + (i * 4096)) | 7;
     }
 
-    // DÜZELTME 2: Ana Klasörlere (Directory) Kullanıcı izni (| 7) veriyoruz ki, 
-    // içerideki User (| 7) ve Kernel (| 3) ayrımı geçerli olabilsin!
+    // 3. Tablo (8 - 12 MB) - IPC Toplantı Odası
+    for(unsigned int i = 0; i < 1024; i++) {
+        third_page_table[i] = (0x800000 + (i * 4096)) | 7;
+    }
+
+    // Dizinleri (Directory) ayarla ve hepsine KULLANICI İZNİ (| 7) ver!
     page_directory[0] = ((unsigned int)first_page_table) | 7; 
     page_directory[1] = ((unsigned int)second_page_table) | 7; 
-    
-    // ... (Aşağıdaki framebuffer_addr kodları aynen kalacak) ...
+    page_directory[2] = ((unsigned int)third_page_table) | 7; 
     
     if (framebuffer_addr != 0) {
         unsigned int pd_index = framebuffer_addr >> 22;
         if (pd_index > 1) { 
             for (int t = 0; t < 4; t++) { 
                 unsigned int block_start = (pd_index + t) << 22; 
-                // YENİ: Ekrana çizim yapabilmeleri için VBE sayfalarını da Kullanıcıya açıyoruz (| 7)
                 for(int i = 0; i < 1024; i++) vbe_page_tables[t][i] = (block_start + (i * 4096)) | 7; 
                 page_directory[pd_index + t] = ((unsigned int)vbe_page_tables[t]) | 7;
             }
         }
     }
     enable_paging((unsigned int)page_directory);
+}
+
+// IPC Toplantı Odasının Adresini Veren API
+void* api_get_shared_memory(void) {
+    return (void*)0x800000; 
 }
 // ============================================================================
 // DİNAMİK BELLEK YÖNETİCİSİ (HEAP / MALLOC / FREE)

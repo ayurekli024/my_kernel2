@@ -86,6 +86,23 @@ void* api_get_shared_memory(void) {
     return (void*)0x800000; 
 }
 // ============================================================================
+// DMA (DOĞRUDAN BELLEK ERİŞİMİ) YÖNETİCİSİ - AĞ KARTI İÇİN
+// ============================================================================
+// RTL8139 gelen paketleri çekirdeği yormadan doğrudan RAM'e yazar.
+// Bunun için 3. MB (0x300000) civarında, fiziksel olarak ardışık bir alan ayırıyoruz.
+unsigned int dma_memory_pointer = 0x300000; 
+
+void* dma_alloc(unsigned int size) {
+    void* ptr = (void*)dma_memory_pointer;
+    dma_memory_pointer += size;
+    
+    // Belleği donanım standartları gereği 4 bayt (32-bit) sınırına hizala
+    if (dma_memory_pointer % 4 != 0) {
+        dma_memory_pointer += (4 - (dma_memory_pointer % 4));
+    }
+    return ptr;
+}
+// ============================================================================
 // DİNAMİK BELLEK YÖNETİCİSİ (HEAP / MALLOC / FREE)
 // ============================================================================
 

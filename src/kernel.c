@@ -675,6 +675,14 @@ void execute_command(char* cmd) {
         strcpy(terminal_response, "Sen dedin ki: ");
         strcat(terminal_response, cmd + 6); 
     }
+    // ========================================================
+    // YENİ: İNTERNET VE AĞ KOMUTLARI
+    // ========================================================
+    else if (strcmp(first_word, "ping") == 0) {
+        extern void rtl8139_send_arp(void);
+        rtl8139_send_arp();
+        strcpy(terminal_response, "[ SISTEM ] QEMU Yonlendiricisine (10.0.2.2) ARP İsteği atiliyor...");
+    }
     else if (strncmp(cmd, "hesapla ", 8) == 0) {
         int i = 8; 
         while(cmd[i] == ' ') i++;
@@ -896,6 +904,12 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     if (vesa_framebuffer != 0) init_graphics(vesa_framebuffer, 1024, 768);
     init_timer(100);
     init_disk();
+    // YENİ: PCI Veriyolu ve Ağ Kartı Başlatıcıları
+    // (Henüz dosyaları oluşturmadığımız için şimdilik yorum satırı yapıyoruz)
+    //extern void init_pci(void);
+    extern void init_rtl8139(void);
+    //init_pci();
+    init_rtl8139();
     __asm__ __volatile__ ("sti");
 
     windows[0].id = 0; windows[0].is_open = 1; windows[0].is_dragging = 0;
@@ -909,7 +923,7 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     focused_window = 0; last_mouse_x = mouse_x; last_mouse_y = mouse_y;
     
     // Terminali başlat
-    terminal_print("ArdaOS V0.3 Multitasking'e Hos Geldiniz!");
+    terminal_print("ArdaOS V0.5 Multitasking'e Hos Geldiniz!");
 
     // ==========================================
     // MULTITASKING ANA DÖNGÜSÜ

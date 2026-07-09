@@ -68,7 +68,7 @@ disk: yilan.bin okuyucu.bin bomba.bin kedi.bin daktilo.bin
 
 # 5. Aşama: QEMU'yu başlat (Başlamadan önce ISO ve disk otomatik güncellenir)
 run: $(ISO_TARGET) disk
-	qemu-system-i386 -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 -cdrom myos.iso -drive file=c.img,format=raw -boot d
+	qemu-system-i386 -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 -cdrom myos.iso -netdev user,id=net0 -device rtl8139,netdev=net0 -drive file=c.img,format=raw -boot d
 
 # Temizlik
 clean:

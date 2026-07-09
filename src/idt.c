@@ -31,9 +31,9 @@ void pic_remap(void) {
     // Diğer her şey "1" (KAPALI/MASKELİ). İkili: 11111001 = 0xF9
     outb(0x21, 0xF9); 
     
-    // SLAVE PIC: Sadece Fare (Bit 4) "0" (AÇIK)
-    // Diğer her şey "1" (KAPALI/MASKELİ). İkili: 11101111 = 0xEF
-    outb(0xA1, 0xEF); 
+    // SLAVE PIC: Fare (Bit 4) ve Ağ Kartı IRQ11 (Bit 3) AÇIK 
+    // İkili: 11100111 = 0xE7
+    outb(0xA1, 0xE7);
 }
 // ... (Üst kısımdaki pic_remap ve struct tanımları aynı kalacak) ...
 extern void api_add_shape(int x, int y, int w, int h, unsigned int color);
@@ -161,6 +161,9 @@ void init_idt(void) {
     // Kendi yazdığımız donanım sürücüleri
     idt_set_gate(33, (unsigned long)keyboard_handler, 0x08, 0x8E);
     idt_set_gate(44, (unsigned long)mouse_handler, 0x08, 0x8E);
+    // YENİ: Ağ Kartı (RTL8139) için IRQ 11 (INT 43) Kapısı
+    extern void rtl8139_handler(void);
+    idt_set_gate(43, (unsigned long)rtl8139_handler, 0x08, 0x8E);
     // YENİ: DPL 3 (0xEE) ile bu kesmeleri Ring 3 (Kullanıcı) moduna açıyoruz!
     idt_set_gate(128, (unsigned long)syscall_handler, 0x08, 0xEE); 
     idt_set_gate(129, (unsigned long)yield_handler, 0x08, 0xEE);

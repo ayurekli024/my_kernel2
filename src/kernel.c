@@ -192,6 +192,27 @@ int api_read_file(const char* name, const char* ext, unsigned char* buffer) {
     unsigned char* real_buffer = (unsigned int)buffer < 0x100000 ? (unsigned char*)(base + (unsigned int)buffer) : buffer;
     return ardaos_read_file(real_name, real_ext, real_buffer);
 }
+// ========================================================
+// VFS KÖPRÜSÜ: SANAL DONANIMLARI OKUMA (Hardware Abstraction)
+// ========================================================
+int kernel_read_keyboard(unsigned char* buffer) {
+    if (focused_window >= 2 && windows[focused_window].is_open) {
+        if (windows[focused_window].owner_task_id == current_task->id) {
+            char k = last_game_key;
+            last_game_key = 0; // Tuşu okuduk, sıfırla
+            
+            if (k != 0) {
+                buffer[0] = k;
+                return 1; // 1 Bayt okundu
+            }
+            
+            // İşlemciyi yormamak için görev uyutulur
+            current_task->state = 1; // BLOCKED
+            return 0; // 0 Bayt okundu (Uygulama tekrar denemeli)
+        }
+    }
+    return -1; // Yetki yok
+}
 // TERMINAL YAZDIRMA VE KAYDIRMA (SCROLLING) MOTORU
 void terminal_print(const char* text) {
     int i = 0;

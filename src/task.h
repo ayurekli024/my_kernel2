@@ -1,7 +1,9 @@
 #ifndef TASK_H
 #define TASK_H
+// YENİ: VFS İçin Dosya Nesnesi (File Object)
 typedef struct {
-    int is_open;          // Dosya açık mı? (1 = Evet, 0 = Hayır)
+    int is_open;          // Dosya açık mı?
+    int type;             // YENİ: 0 = Normal Disk Dosyası, 1 = Sanal Cihaz (Klavye vb.)
     unsigned int size;    // Dosyanın toplam boyutu
     unsigned int offset;  // Dosyanın neresinde kaldığımızı (imleç) tutar
     

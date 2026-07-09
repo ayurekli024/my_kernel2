@@ -2,7 +2,7 @@
 #include "io.h"
 #include "string.h"
 #include "graphics.h"
-
+#include "task.h"
 fat16_bpb_t bpb;
 unsigned int root_dir_start_lba;
 unsigned int data_start_lba;
@@ -309,4 +309,72 @@ int ardaos_create_dir(const char* dirname) {
     
     ata_lba_write(root_dir_start_lba, 1, (unsigned short*)root_dir);
     return 0;
+}
+// ==========================================================
+// SANAL DOSYA SİSTEMİ (VFS) MOTORU
+// ==========================================================
+
+// 1. sys_open: Dosyayı bul, bilet numarasını (FD) dön
+int vfs_open(const char* filename, const char* ext) {
+    if (current_task == 0) return -1;
+    
+    // Task'ın bilet kutusunda boş bir yer (FD) bul
+    int free_fd = -1;
+    for (int i = 0; i < MAX_FD_PER_TASK; i++) {
+        if (current_task->fd_table[i].is_open == 0) {
+            free_fd = i; break;
+        }
+    }
+    if (free_fd == -1) return -1; // Maksimum açık dosya sınırına ulaşıldı!
+
+    // FAT16 dizininde dosyayı ara (eski kodun arama mantığıyla aynı)
+    directory_entry_t root_dir[16]; 
+    ata_lba_read(root_dir_start_lba, 1, (unsigned short*)root_dir);
+    for (int i = 0; i < 16; i++) {
+        if (root_dir[i].name[0] == 0 || root_dir[i].name[0] == (char)0xE5) continue; 
+        if (strncmp(root_dir[i].name, filename, 8) == 0 && strncmp(root_dir[i].ext, ext, 3) == 0) {
+            
+            // Dosya bulundu! Bilgilerini Görevin (Task) RAM'ine kaydet
+            current_task->fd_table[free_fd].is_open = 1;
+            current_task->fd_table[free_fd].size = root_dir[i].size;
+            current_task->fd_table[free_fd].offset = 0; // Okumaya en baştan (0) başla
+            current_task->fd_table[free_fd].cluster = root_dir[i].cluster;
+            current_task->fd_table[free_fd].lba_start = data_start_lba + ((root_dir[i].cluster - 2) * bpb.sectors_per_cluster);
+            
+            return free_fd; // Bilet numarasını (Örn: 0, 1, 2) dön
+        }
+    }
+    return -1; // Dosya bulunamadı
+}
+
+// 2. sys_read: Bilet numarasına (FD) göre diskten oku ve imleci (offset) ilerlet
+int vfs_read(int fd, unsigned char* target_buffer, int count) {
+    if (current_task == 0 || fd < 0 || fd >= MAX_FD_PER_TASK) return -1;
+    if (current_task->fd_table[fd].is_open == 0) return -1; // Bu dosya kapalı!
+
+    file_obj_t* file = &current_task->fd_table[fd];
+    
+    // Dosyanın sonuna gelip gelmediğimizi (EOF) kontrol et
+    if (file->offset >= file->size) return 0; // Okunacak bir şey kalmadı
+    
+    // Okunacak byte miktarını (count) dosyanın kalan boyutuna göre sınırla
+    int bytes_left = file->size - file->offset;
+    if (count > bytes_left) count = bytes_left;
+    
+    // ŞİMDİLİK BASİT SÜRÜM: Okuma her zaman sektörün (512 byte) başından yapılır
+    // İlerleyen aşamalarda offset hesabını daha detaylı yapacağız.
+    unsigned int sectors_to_read = (file->size + 511) / 512;
+    if (sectors_to_read == 0) sectors_to_read = 1;
+    
+    ata_lba_read(file->lba_start, sectors_to_read, (unsigned short*)target_buffer);
+    
+    file->offset += count; // İmleci ileri kaydır
+    return count; // Başarıyla okunan byte sayısını dön
+}
+
+// 3. sys_close: Bileti (FD) iptal et
+void vfs_close(int fd) {
+    if (current_task != 0 && fd >= 0 && fd < MAX_FD_PER_TASK) {
+        current_task->fd_table[fd].is_open = 0; 
+    }
 }

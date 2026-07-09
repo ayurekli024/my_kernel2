@@ -219,13 +219,23 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         api_exit_app(); // Çekirdeğe git ve CPU'yu devret
         return 1;
     }
-    // API No 10: Dosya Yazma
+    // API No 10: Dosya Yazma (Şimdilik eski haliyle kalacak, ileride VFS'e geçecek)
     else if (sys_num == 10) {
         return api_write_file((const char*)arg1, (const char*)arg2, (unsigned char*)arg3);
     }
-    // API No 11: Dosya Okuma
+    
+    // ==========================================
+    // YENİ VFS (Sanal Dosya Sistemi) Syscalls
+    // ==========================================
+    
+    // API No 11: sys_open (Dosyayı aç ve FD dön)
+    // Beklenen: arg1=name, arg2=ext
     else if (sys_num == 11) {
-        return api_read_file((const char*)arg1, (const char*)arg2, (unsigned char*)arg3);
+        unsigned int base = current_task->app_base;
+        const char* real_name = (unsigned int)arg1 < 0x100000 ? (const char*)(base + arg1) : (const char*)arg1;
+        const char* real_ext = (unsigned int)arg2 < 0x100000 ? (const char*)(base + arg2) : (const char*)arg2;
+        extern int vfs_open(const char*, const char*);
+        return vfs_open(real_name, real_ext);
     }
     // API No 12: Terminale Mesaj Yazdirma (sys_print)
     else if (sys_num == 12) {
@@ -242,6 +252,22 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
     else if (sys_num == 14) {
         extern void* api_get_shared_memory(void);
         return (unsigned int)api_get_shared_memory();
+    }
+    // API No 15: sys_read (FD kullanarak oku)
+    // Beklenen: arg1=fd, arg2=buffer, arg3=count
+    else if (sys_num == 15) {
+        unsigned int base = current_task->app_base;
+        unsigned char* real_buffer = (unsigned int)arg2 < 0x100000 ? (unsigned char*)(base + arg2) : (unsigned char*)arg2;
+        extern int vfs_read(int, unsigned char*, int);
+        return vfs_read((int)arg1, real_buffer, (int)arg3);
+    }
+    
+    // API No 16: sys_close (Dosyayı kapat)
+    // Beklenen: arg1=fd
+    else if (sys_num == 16) {
+        extern void vfs_close(int);
+        vfs_close((int)arg1);
+        return 1;
     }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
     return -1;

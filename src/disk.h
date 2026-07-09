@@ -38,5 +38,8 @@ void ardaos_list_files(char* output_buffer);
 
 int ardaos_delete_file(const char* filename, const char* ext);
 int ardaos_create_dir(const char* dirname);
+int vfs_open(const char* filename, const char* ext);
+int vfs_read(int fd, unsigned char* buffer, int count);
+void vfs_close(int fd);
 
 #endif

@@ -45,36 +45,38 @@ int create_task(void (*func)(void), unsigned int app_base, char* args) {
         stack_top_addr &= ~3;                // Stack'i GCC'nin sevdiği gibi 4 bayta hizala
     }
     
-    // ...
-    unsigned int* stack_top = (unsigned int*)stack_top_addr;
+    // ... (stack_top_addr ayarları ve strcpy kısımları aynı kalacak) ...
     
-    // CDECL STANDARDI: PARAMETRE VE DÖNÜŞ ADRESİ
-    *(--stack_top) = (unsigned int)target_args; 
-    *(--stack_top) = 0x00000000;                
+    unsigned int* stack_top = (unsigned int*)stack_top_addr;
     
     // Hangi yetki seviyesinde olduğumuzu anla
     int is_user = (app_base != 0); // Arka plan sayacı (0) hariç herkes Ring 3'e düşecek!
 
     if (is_user) {
+        // 1. Kullanıcı yığınını (User Stack) ayarla (3 KB noktası)
+        unsigned int* user_stack_top = (unsigned int*)(new_task->stack_base + 3072);
+
+        // 2. DÜZELTME: Argümanları Kullanıcı Yığınına İT! (Kernel yığınına değil)
+        *(--user_stack_top) = (unsigned int)target_args; // 1. Parametre (args)
+        *(--user_stack_top) = 0x00000000;                // Sahte Dönüş Adresi
+
         // --- RING 3 (KULLANICI MODU) SAHTE IRET ÇERÇEVESİ ---
         *(--stack_top) = 0x23; // User SS
-        
-        // YENİ: Uygulamaya kendi 4KB'lık bloğunun alt 3KB'ını veriyoruz, üst 1KB Çekirdeğe kalıyor!
-        *(--stack_top) = new_task->stack_base + 3072; 
-        
+        *(--stack_top) = (unsigned int)user_stack_top; // YENİ: Parametrelerin olduğu User ESP'yi ver!
         *(--stack_top) = 0x202; // EFLAGS
         *(--stack_top) = 0x1B; // User CS
         *(--stack_top) = (unsigned int)func; // EIP
     } else {
         // --- RING 0 (ÇEKİRDEK MODU) SAHTE IRET ÇERÇEVESİ ---
-        // İşlemci Ring 0'da kalacağı için Stack değişmez, 3 parametre bekler.
+        // Çekirdek görevleri User ESP kullanmaz, argümanları kendi yığınına ister
+        *(--stack_top) = (unsigned int)target_args;
+        *(--stack_top) = 0x00000000;
+
         *(--stack_top) = 0x202; // EFLAGS
         *(--stack_top) = 0x08;  // Kernel CS
         *(--stack_top) = (unsigned int)func; // EIP
     }
-    
-    // --- PUSHA FRAME (8 Yazmaç) ---
-    // ... (Aşağıdaki pusha frame aynı kalacak)
+
     // --- PUSHA FRAME (8 Yazmaç) ---
     *(--stack_top) = 0; // EAX
     *(--stack_top) = 0; // ECX

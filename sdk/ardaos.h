@@ -37,4 +37,20 @@ static inline void* sys_shm_get() {
     __asm__ __volatile__ ("int $0x80" : "=a"(shm_ptr) : "a"(14));
     return shm_ptr;
 }
+// YENİ VFS (POSIX) STANDARTLARI
+static inline int sys_open(const char* name, const char* ext) {
+    int fd;
+    __asm__ __volatile__ ("int $0x80" : "=a"(fd) : "a"(11), "b"((unsigned int)name), "c"((unsigned int)ext));
+    return fd;
+}
+
+static inline int sys_read(int fd, unsigned char* buffer, int count) {
+    int ret;
+    __asm__ __volatile__ ("int $0x80" : "=a"(ret) : "a"(15), "b"(fd), "c"((unsigned int)buffer), "d"(count));
+    return ret;
+}
+
+static inline void sys_close(int fd) {
+    __asm__ __volatile__ ("int $0x80" : : "a"(16), "b"(fd));
+}
 #endif

@@ -58,13 +58,17 @@ kedi.bin: sdk/kedi.c
 daktilo.bin: sdk/daktilo.c
 	$(CC) $(APP_CFLAGS) -c sdk/daktilo.c -o sdk/daktilo.o
 	ld -m elf_i386 -T sdk/app.ld sdk/daktilo.o -o daktilo.bin
+istemci.bin: sdk/istemci.c
+	$(CC) $(APP_CFLAGS) -c sdk/istemci.c -o sdk/istemci.o
+	ld -m elf_i386 -T sdk/app.ld sdk/istemci.o -o istemci.bin
 # 4. Aşama: Uygulamaları FAT16 Diske (c.img) Enjekte Etme
-disk: yilan.bin okuyucu.bin bomba.bin kedi.bin daktilo.bin
+disk: yilan.bin okuyucu.bin bomba.bin kedi.bin daktilo.bin istemci.bin
 	mcopy -o -i c.img yilan.bin ::/YILAN.BIN
 	mcopy -o -i c.img okuyucu.bin ::/OKUYUCU.BIN
 	mcopy -o -i c.img bomba.bin ::/BOMBA.BIN
 	mcopy -o -i c.img kedi.bin ::/KEDI.BIN
 	mcopy -o -i c.img daktilo.bin ::/DAKTILO.BIN
+	mcopy -o -i c.img istemci.bin ::/ISTEMCI.BIN
 
 # 5. Aşama: QEMU'yu başlat (Başlamadan önce ISO ve disk otomatik güncellenir)
 run: $(ISO_TARGET) disk
@@ -72,5 +76,5 @@ run: $(ISO_TARGET) disk
 
 # Temizlik
 clean:
-	rm -f src/*.o sdk/*.o $(TARGET) $(ISO_TARGET) yilan.bin okuyucu.bin bomba.bin kedi.bin daktilo.bin
+	rm -f src/*.o sdk/*.o $(TARGET) $(ISO_TARGET) yilan.bin okuyucu.bin bomba.bin kedi.bin daktilo.bin istemci.bin
 	rm -rf isodir

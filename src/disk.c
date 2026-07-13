@@ -337,6 +337,24 @@ int vfs_open(const char* filename, const char* ext) {
         current_task->fd_table[free_fd].offset = 0;
         return free_fd;
     }
+    // YENİ: Ağ Soketi Açma (UNIX Felsefesi)
+    if (strncmp(filename, "NET", 3) == 0 && strncmp(ext, "UDP", 3) == 0) {
+        current_task->fd_table[free_fd].is_open = 1;
+        current_task->fd_table[free_fd].type = 2; // 2 = Ağ Soketi
+        current_task->fd_table[free_fd].size = 0xFFFFFFFF; 
+        current_task->fd_table[free_fd].offset = 0;
+        
+        // Muazzam Bir Hack: QEMU'nun dâhili DNS Sunucusuna (10.0.2.3:53) bağlanıyoruz.
+        // Oraya rastgele metin yolladığımızda bize kızıp "Format Hatası" diye geri UDP yollayacak!
+        current_task->fd_table[free_fd].target_ip[0] = 10;
+        current_task->fd_table[free_fd].target_ip[1] = 0;
+        current_task->fd_table[free_fd].target_ip[2] = 2;
+        current_task->fd_table[free_fd].target_ip[3] = 3;
+        current_task->fd_table[free_fd].target_port = 53; // DNS Portu
+        current_task->fd_table[free_fd].local_port = 5555;
+        
+        return free_fd;
+    }
 
     // Klasik FAT16 dizin arama kodu
     directory_entry_t root_dir[16]; 
@@ -370,7 +388,22 @@ int vfs_read(int fd, unsigned char* target_buffer, int count) {
         extern int kernel_read_keyboard(unsigned char* buffer);
         return kernel_read_keyboard(target_buffer); 
     }
-
+    // YENİ: Soketten Veri Okuma
+    if (file->type == 2) {
+        extern int udp_inbox_ready;
+        extern int udp_inbox_size;
+        extern unsigned char udp_inbox[];
+        
+        if (udp_inbox_ready) {
+            int to_copy = count < udp_inbox_size ? count : udp_inbox_size;
+            for(int i = 0; i < to_copy; i++) target_buffer[i] = udp_inbox[i];
+            target_buffer[to_copy] = '\0';
+            udp_inbox_ready = 0; // Okuduk, kutuyu boşalt
+            return to_copy;
+        }
+        
+        return 0;
+    }
     // Eğer Disk Dosyasıysa (type == 0), eski okuma mantığına devam et:
     if (file->offset >= file->size) return 0; 
     
@@ -391,4 +424,20 @@ void vfs_close(int fd) {
     if (current_task != 0 && fd >= 0 && fd < MAX_FD_PER_TASK) {
         current_task->fd_table[fd].is_open = 0; 
     }
+}
+// YENİ: VFS Üzerinden Veri (veya Ağ Paketi) Yazma Motoru
+int vfs_write(int fd, unsigned char* buffer, int count) {
+    if (current_task == 0 || fd < 0 || fd >= MAX_FD_PER_TASK) return -1;
+    if (current_task->fd_table[fd].is_open == 0) return -1; 
+
+    file_obj_t* file = &current_task->fd_table[fd];
+    
+    // Eğer bu bir Ağ Soketiyse, VFS veriyi doğrudan UDP motoruna yollar!
+    if (file->type == 2) {
+        extern void rtl8139_send_udp(unsigned char*, unsigned short, unsigned short, unsigned char*, int);
+        rtl8139_send_udp(file->target_ip, file->target_port, file->local_port, buffer, count);
+        return count;
+    }
+    
+    return -1; // Disk dosyalarına yazma (şimdilik desteklenmiyor)
 }

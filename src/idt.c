@@ -272,6 +272,13 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         vfs_close((int)arg1);
         return 1;
     }
+    // API No 17: sys_write (FD kullanarak yaz)
+    else if (sys_num == 17) {
+        unsigned int base = current_task->app_base;
+        unsigned char* real_buffer = (unsigned int)arg2 < 0x100000 ? (unsigned char*)(base + arg2) : (unsigned char*)arg2;
+        extern int vfs_write(int, unsigned char*, int);
+        return vfs_write((int)arg1, real_buffer, (int)arg3);
+    }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
     return -1;
 }

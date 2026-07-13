@@ -53,4 +53,9 @@ static inline int sys_read(int fd, unsigned char* buffer, int count) {
 static inline void sys_close(int fd) {
     __asm__ __volatile__ ("int $0x80" : : "a"(16), "b"(fd));
 }
+static inline int sys_write(int fd, unsigned char* buffer, int count) {
+    int ret;
+    __asm__ __volatile__ ("int $0x80" : "=a"(ret) : "a"(17), "b"(fd), "c"((unsigned int)buffer), "d"(count));
+    return ret;
+}
 #endif

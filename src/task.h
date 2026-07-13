@@ -10,6 +10,9 @@ typedef struct {
     // Arka planda diske erişmek için gereken FAT16 bilgileri
     unsigned short cluster; 
     unsigned int lba_start;
+    unsigned char target_ip[4];
+    unsigned short target_port;
+    unsigned short local_port;
 } file_obj_t;
 
 #define MAX_FD_PER_TASK 8 // Bir uygulama aynı anda en fazla 8 dosya açabilir

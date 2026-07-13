@@ -675,13 +675,21 @@ void execute_command(char* cmd) {
         strcpy(terminal_response, "Sen dedin ki: ");
         strcat(terminal_response, cmd + 6); 
     }
-    // ========================================================
-    // YENİ: İNTERNET VE AĞ KOMUTLARI
-    // ========================================================
     else if (strcmp(first_word, "ping") == 0) {
-        extern void rtl8139_send_arp(void);
-        rtl8139_send_arp();
-        strcpy(terminal_response, "[ SISTEM ] QEMU Yonlendiricisine (10.0.2.2) ARP İsteği atiliyor...");
+        extern int arp_resolved;
+        
+        // Eğer MAC adresini henüz bilmiyorsak (arp_resolved == 0)
+        if (arp_resolved == 0) {
+            extern void rtl8139_send_arp(void);
+            rtl8139_send_arp();
+            strcpy(terminal_response, "[ SISTEM ] MAC adresi bilinmiyor. ARP Istegi atildi.");
+        } 
+        // Eğer MAC adresini biliyorsak, GERÇEK İNTERNET PING'ini fırlat!
+        else {
+            extern void rtl8139_send_ping(void);
+            rtl8139_send_ping();
+            strcpy(terminal_response, "[ SISTEM ] GERCEK ICMP PING PAKETI FIRLATILDI!");
+        }
     }
     else if (strncmp(cmd, "hesapla ", 8) == 0) {
         int i = 8; 

@@ -64,7 +64,22 @@ void init_rtl8139() {
 // O anki müsait iletim (Transmit) kanalını takip etmek için (RTL8139'da 4 kanal vardır: 0-3)
 static int tx_descriptor = 0;
 static unsigned char* tx_buffer = 0;
+// --- YENİ EKLENECEKLER ---
+// Yönlendiricinin MAC adresini tutacağımız değişken ve ARP'nin çözülüp çözülmediği bilgisi
+unsigned char router_mac[6] = {0};
+int arp_resolved = 0;
 
+// İnternet paketlerinin bozuk olup olmadığını anlayan meşhur Checksum algoritması
+unsigned short net_checksum(unsigned char* data, int len) {
+    unsigned int sum = 0;
+    for (int i = 0; i < len; i += 2) {
+        sum += (data[i] << 8) | data[i+1];
+    }
+    while (sum >> 16) {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+    return ~sum;
+}
 void rtl8139_send_arp() {
     // Sadece ilk seferde TX tamponu için DMA belleği ayır (Sürekli RAM harcamamak için)
     if (tx_buffer == 0) {
@@ -111,27 +126,46 @@ void rtl8139_send_arp() {
 static unsigned int rx_offset = 0;
 
 void rtl8139_handler_main() {
-    unsigned short status = inw(rtl_io_base + 0x3E); // ISR Register
+    unsigned short status = inw(rtl_io_base + 0x3E); 
     
-    // YENİ: Eğer paket başarıyla GÖNDERİLDİYSE (Transmit OK)
     if (status & 0x04) {
-        terminal_print("[ INTERNET ] ARP Paketi Basariyla Gonderildi (TX OK)!");
+        // terminal_print("[ INTERNET ] Paket Gonderildi (TX OK)"); // Ekranda kalabalık yapmasın diye gizleyebiliriz
     }
     
-    // Eğer paket başarıyla ALINDIysa (Receive OK)
     if (status & 0x01) {
-        unsigned short rx_status = *(unsigned short*)(rx_buffer + rx_offset);
         unsigned short rx_length = *(unsigned short*)(rx_buffer + rx_offset + 2);
         unsigned char* packet = rx_buffer + rx_offset + 4;
         unsigned short ether_type = (packet[12] << 8) | packet[13]; 
         
-        char msg[128] = "[ INTERNET ] Paket Yakalandi! Boyut: ";
+        char msg[128] = "[ INTERNET ] Paket: ";
         char len_str[10]; itoa(rx_length, len_str);
         strcat(msg, len_str);
         
-        if (ether_type == 0x0800) strcat(msg, " Bayt (Tur: IPv4)");
-        else if (ether_type == 0x0806) strcat(msg, " Bayt (Tur: ARP Yaniti!)");
-        else if (ether_type == 0x86DD) strcat(msg, " Bayt (Tur: IPv6)");
+        // ==========================================
+        // YENİ: PAKET AYRIŞTIRICI (PACKET PARSER)
+        // ==========================================
+        if (ether_type == 0x0806) { // Eğer ARP ise
+            unsigned short arp_opcode = (packet[20] << 8) | packet[21];
+            if (arp_opcode == 2) { // 2 = ARP Reply (Cevap)
+                // QEMU Yönlendiricisinin MAC Adresini (22-27 baytları arası) Hafızaya Kaydet!
+                for(int i = 0; i < 6; i++) router_mac[i] = packet[22+i];
+                arp_resolved = 1; 
+                strcat(msg, " Bayt (Tur: ARP YANITI - MAC Kaydedildi!)");
+            } else {
+                strcat(msg, " Bayt (Tur: ARP ISTEGI)");
+            }
+        } 
+        else if (ether_type == 0x0800) { // Eğer IPv4 ise
+            if (packet[23] == 0x01) { // Eğer Protokol ICMP (Ping) ise
+                if (packet[34] == 0x00) { // 0 = Echo Reply (PONG!)
+                    strcat(msg, " Bayt - [ PING YANITI ALINDI (PONG)!!! ]");
+                } else {
+                    strcat(msg, " Bayt (Tur: ICMP İstegi)");
+                }
+            } else {
+                strcat(msg, " Bayt (Tur: IPv4 Diger)");
+            }
+        }
         else strcat(msg, " Bayt (Tur: Diger)");
         
         terminal_print(msg);
@@ -140,8 +174,8 @@ void rtl8139_handler_main() {
         outw(rtl_io_base + 0x38, rx_offset - 16); 
     }
     
-    outw(rtl_io_base + 0x3E, 0x05); // ISR'yi temizle
-    outb(0x20, 0x20); outb(0xA0, 0x20); // EOI (Interrupt Bitti)
+    outw(rtl_io_base + 0x3E, 0x05); 
+    outb(0x20, 0x20); outb(0xA0, 0x20); 
 }
 
 // İŞTE EKSİK PARÇA: Linker'ın aradığı Kesme Sıçrama Tahtası (Naked Interrupt Wrapper)
@@ -153,4 +187,53 @@ __attribute__((naked)) void rtl8139_handler(void) {
         "popa\n"                     // Yazmaçları geri yükle
         "iret\n"                    // Kesmeden (Interrupt) donanımsal olarak çık
     );
+}
+void rtl8139_send_ping() {
+    if (tx_buffer == 0) tx_buffer = (unsigned char*)dma_alloc(128);
+
+    unsigned char ping_packet[74] = {0}; // 14 (Eth) + 20 (IP) + 40 (ICMP+Data)
+    
+    // 1. ETHERNET KATMANI (Layer 2)
+    for(int i=0; i<6; i++) ping_packet[i] = router_mac[i]; // Hedef (Router MAC)
+    for(int i=0; i<6; i++) ping_packet[6+i] = mac_address[i]; // Kaynak (Biz)
+    ping_packet[12] = 0x08; ping_packet[13] = 0x00; // Type: IPv4
+    
+    // 2. IPv4 KATMANI (Layer 3)
+    ping_packet[14] = 0x45; // Version 4, Header Length 5
+    ping_packet[15] = 0x00; // DSCP
+    ping_packet[16] = 0x00; ping_packet[17] = 0x3C; // Toplam Boyut: 60 bayt (20 IP + 40 ICMP)
+    ping_packet[18] = 0xAB; ping_packet[19] = 0xCD; // ID
+    ping_packet[20] = 0x00; ping_packet[21] = 0x00; // Flags/Frag
+    ping_packet[22] = 0x40; // TTL (Time to Live) = 64
+    ping_packet[23] = 0x01; // Protokol = ICMP
+    // Kaynak IP (Biz: 10.0.2.15)
+    ping_packet[26] = 10; ping_packet[27] = 0; ping_packet[28] = 2; ping_packet[29] = 15; 
+    // Hedef IP (QEMU Router: 10.0.2.2)
+    ping_packet[30] = 10; ping_packet[31] = 0; ping_packet[32] = 2; ping_packet[33] = 2;  
+    
+    // IP Checksum Hesapla ve Yaz (Hayati önem taşır, bozuksa router paketi çöpe atar)
+    unsigned short ip_csum = net_checksum(&ping_packet[14], 20);
+    ping_packet[24] = (ip_csum >> 8) & 0xFF;
+    ping_packet[25] = ip_csum & 0xFF;
+    
+    // 3. ICMP KATMANI (Ping)
+    ping_packet[34] = 0x08; // Type = 8 (Echo Request)
+    ping_packet[35] = 0x00; // Code = 0
+    ping_packet[38] = 0x00; ping_packet[39] = 0x01; // ID
+    ping_packet[40] = 0x00; ping_packet[41] = 0x01; // Sequence
+    
+    // Paketin Yükü (Data) - İnternette yankılanacak o meşhur metin!
+    const char* payload = "ArdaOS ICMP Ping Test Paketi!!!"; // 31 Karakter
+    for(int i=0; i<32; i++) ping_packet[42+i] = payload[i];
+    
+    // ICMP Checksum Hesapla ve Yaz
+    unsigned short icmp_csum = net_checksum(&ping_packet[34], 40);
+    ping_packet[36] = (icmp_csum >> 8) & 0xFF;
+    ping_packet[37] = icmp_csum & 0xFF;
+    
+    // DMA'ya kopyala ve Ağ Kartını Ateşle!
+    for(int i = 0; i < 74; i++) tx_buffer[i] = ping_packet[i];
+    outl(rtl_io_base + 0x20 + (tx_descriptor * 4), (unsigned int)tx_buffer);
+    outl(rtl_io_base + 0x10 + (tx_descriptor * 4), 74);
+    tx_descriptor = (tx_descriptor + 1) % 4;
 }

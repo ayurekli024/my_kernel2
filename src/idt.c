@@ -279,6 +279,10 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         extern int vfs_write(int, unsigned char*, int);
         return vfs_write((int)arg1, real_buffer, (int)arg3);
     }
+    // API No 18: sys_get_app_base (Uygulamanın RAM'deki gerçek adresini dön)
+    else if (sys_num == 18) {
+        return current_task->app_base;
+    }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
     return -1;
 }

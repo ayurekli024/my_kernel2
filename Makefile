@@ -42,25 +42,34 @@ $(ISO_TARGET): $(TARGET) grub.cfg
 	rm -rf isodir
 
 # 3. Aşama: Harici Uygulamaları (SDK) Derleme
-yilan.bin: sdk/yilan.c
-	$(CC) $(APP_CFLAGS) -c sdk/yilan.c -o sdk/yilan.o
-	ld -m elf_i386 -T sdk/app.ld sdk/yilan.o -o yilan.bin
 
-okuyucu.bin: sdk/okuyucu.c
+# ÖNCE LIBC KÜTÜPHANESİNİ DERLE!
+sdk/libc.o: sdk/libc.c
+	$(CC) $(APP_CFLAGS) -c sdk/libc.c -o sdk/libc.o
+
+yilan.bin: sdk/yilan.c sdk/libc.o
+	$(CC) $(APP_CFLAGS) -c sdk/yilan.c -o sdk/yilan.o
+	ld -m elf_i386 -T sdk/app.ld sdk/yilan.o sdk/libc.o -o yilan.bin
+
+okuyucu.bin: sdk/okuyucu.c sdk/libc.o
 	$(CC) $(APP_CFLAGS) -c sdk/okuyucu.c -o sdk/okuyucu.o
-	ld -m elf_i386 -T sdk/app.ld sdk/okuyucu.o -o okuyucu.bin
-bomba.bin: sdk/bomba.c
+	ld -m elf_i386 -T sdk/app.ld sdk/okuyucu.o sdk/libc.o -o okuyucu.bin
+
+bomba.bin: sdk/bomba.c sdk/libc.o
 	$(CC) $(APP_CFLAGS) -c sdk/bomba.c -o sdk/bomba.o
-	ld -m elf_i386 -T sdk/app.ld sdk/bomba.o -o bomba.bin
-kedi.bin: sdk/kedi.c
+	ld -m elf_i386 -T sdk/app.ld sdk/bomba.o sdk/libc.o -o bomba.bin
+
+kedi.bin: sdk/kedi.c sdk/libc.o
 	$(CC) $(APP_CFLAGS) -c sdk/kedi.c -o sdk/kedi.o
-	ld -m elf_i386 -T sdk/app.ld sdk/kedi.o -o kedi.bin
-daktilo.bin: sdk/daktilo.c
+	ld -m elf_i386 -T sdk/app.ld sdk/kedi.o sdk/libc.o -o kedi.bin
+
+daktilo.bin: sdk/daktilo.c sdk/libc.o
 	$(CC) $(APP_CFLAGS) -c sdk/daktilo.c -o sdk/daktilo.o
-	ld -m elf_i386 -T sdk/app.ld sdk/daktilo.o -o daktilo.bin
-istemci.bin: sdk/istemci.c
+	ld -m elf_i386 -T sdk/app.ld sdk/daktilo.o sdk/libc.o -o daktilo.bin
+
+istemci.bin: sdk/istemci.c sdk/libc.o
 	$(CC) $(APP_CFLAGS) -c sdk/istemci.c -o sdk/istemci.o
-	ld -m elf_i386 -T sdk/app.ld sdk/istemci.o -o istemci.bin
+	ld -m elf_i386 -T sdk/app.ld sdk/istemci.o sdk/libc.o -o istemci.bin
 # 4. Aşama: Uygulamaları FAT16 Diske (c.img) Enjekte Etme
 disk: yilan.bin okuyucu.bin bomba.bin kedi.bin daktilo.bin istemci.bin
 	mcopy -o -i c.img yilan.bin ::/YILAN.BIN

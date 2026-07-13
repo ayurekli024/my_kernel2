@@ -58,4 +58,14 @@ static inline int sys_write(int fd, unsigned char* buffer, int count) {
     __asm__ __volatile__ ("int $0x80" : "=a"(ret) : "a"(17), "b"(fd), "c"((unsigned int)buffer), "d"(count));
     return ret;
 }
+// YENİ: DİNAMİK BELLEK SİSTEM ÇAĞRILARI
+static inline void* sys_malloc(unsigned int size) {
+    void* ptr;
+    __asm__ __volatile__ ("int $0x80" : "=a"(ptr) : "a"(19), "b"(size));
+    return ptr;
+}
+
+static inline void sys_free(void* ptr) {
+    __asm__ __volatile__ ("int $0x80" : : "a"(20), "b"((unsigned int)ptr));
+}
 #endif

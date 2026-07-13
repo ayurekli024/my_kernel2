@@ -106,3 +106,12 @@ void printf(const char* format, ...) {
     // Buffer (Yığın) zaten 1MB'ın üzerinde olduğu için sys_print buna itiraz etmeden güvenle yazdıracak!
     sys_print(buffer); 
 }
+// Standart Kütüphane Malloc (Arka planda Kernel Syscall'unu çağırır)
+void* malloc(unsigned int size) {
+    return sys_malloc(size);
+}
+
+// Standart Kütüphane Free (Arka planda Kernel Syscall'unu çağırır)
+void free(void* ptr) {
+    sys_free(ptr);
+}

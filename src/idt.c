@@ -283,6 +283,17 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
     else if (sys_num == 18) {
         return current_task->app_base;
     }
+    // API No 19: sys_malloc (Çekirdekten Dinamik Bellek İste)
+    else if (sys_num == 19) {
+        extern void* malloc(unsigned int size);
+        return (unsigned int)malloc(arg1);
+    }
+    // API No 20: sys_free (Çekirdeğe Dinamik Belleği İade Et)
+    else if (sys_num == 20) {
+        extern void free(void* ptr);
+        free((void*)arg1);
+        return 0;
+    }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
     return -1;
 }

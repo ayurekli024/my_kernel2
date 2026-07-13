@@ -12,5 +12,7 @@ void itoa(int n, char s[]);
 
 // Ve o Efsanevi Fonksiyon!
 void printf(const char* format, ...);
-
+// Dinamik Bellek Yönetimi
+void* malloc(unsigned int size);
+void free(void* ptr);
 #endif

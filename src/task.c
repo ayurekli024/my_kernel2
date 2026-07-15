@@ -14,9 +14,17 @@ void init_tasking() {
     current_task = (task_t*)malloc(sizeof(task_t));
     current_task->id = 0;
     current_task->app_base = 0;
-    // init_tasking() ve create_task() içindeki atamaların arasına ekle:
-    current_task->cpu_ticks = 0; // (create_task için new_task->cpu_ticks = 0;)
-    current_task->cpu_usage = 0; // (create_task için new_task->cpu_usage = 0;) 
+    
+    current_task->cpu_ticks = 0; 
+    current_task->cpu_usage = 0; 
+
+    // ==========================================
+    // YENİ EKLENEN KISIM: KERNEL HAFIZA HARİTASI
+    // ==========================================
+    extern unsigned int page_directory[1024];
+    current_task->cr3 = (unsigned int)page_directory; 
+    // ==========================================
+
     current_task->next = current_task; 
     ready_queue = current_task;
 }
@@ -51,8 +59,17 @@ int create_task(void (*func)(void), unsigned int app_base, char* args) {
     
     // Hangi yetki seviyesinde olduğumuzu anla
     int is_user = (app_base != 0); // Arka plan sayacı (0) hariç herkes Ring 3'e düşecek!
-
+    // ==========================================
+    // YENİ EKLENEN KISIM: DIŞ FONKSİYON BAĞLANTILARI
+    // ==========================================
+    extern unsigned int* create_task_page_dir(void);
+    extern unsigned int page_directory[1024];
     if (is_user) {
+        // ==========================================
+        // YENİ: UYGULAMAYA ÖZEL KLONLANMIŞ HARİTA (CR3)
+        // ==========================================
+        new_task->cr3 = (unsigned int)create_task_page_dir();
+        
         // 1. Kullanıcı yığınını (User Stack) ayarla (3 KB noktası)
         unsigned int* user_stack_top = (unsigned int*)(new_task->stack_base + 3072);
 
@@ -62,11 +79,16 @@ int create_task(void (*func)(void), unsigned int app_base, char* args) {
 
         // --- RING 3 (KULLANICI MODU) SAHTE IRET ÇERÇEVESİ ---
         *(--stack_top) = 0x23; // User SS
-        *(--stack_top) = (unsigned int)user_stack_top; // YENİ: Parametrelerin olduğu User ESP'yi ver!
+        *(--stack_top) = (unsigned int)user_stack_top; // Parametrelerin olduğu User ESP'yi ver!
         *(--stack_top) = 0x202; // EFLAGS
         *(--stack_top) = 0x1B; // User CS
         *(--stack_top) = (unsigned int)func; // EIP
     } else {
+        // ==========================================
+        // YENİ: KERNEL GÖREVLERİ ANA HARİTAYI KULLANIR (CR3)
+        // ==========================================
+        new_task->cr3 = (unsigned int)page_directory;
+
         // --- RING 0 (ÇEKİRDEK MODU) SAHTE IRET ÇERÇEVESİ ---
         // Çekirdek görevleri User ESP kullanmaz, argümanları kendi yığınına ister
         *(--stack_top) = (unsigned int)target_args;

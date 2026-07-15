@@ -206,3 +206,25 @@ void free(void* ptr) {
     }
     next_fit_ptr = heap_head;
 }
+extern unsigned int page_directory[1024];
+
+// Yeni bir görev için tamamen bağımsız bir Sayfa Dizini (CR3) oluşturur
+unsigned int* create_task_page_dir() {
+    // PMM'den fiziksel 4KB'lık temiz bir sayfa al
+    unsigned int* pd = (unsigned int*)pmm_alloc_block();
+    
+    // Önce tüm haritayı "Kullanılmıyor" (Not Present - 0x02) olarak işaretle
+    for(int i = 0; i < 1024; i++) {
+        pd[i] = 0x00000002; 
+    }
+
+    // Çekirdeğin hayati yapılarını (İlk 4MB, VBE Ekran, IPC) yeni haritaya klonla
+    // İleriki aşamalarda uygulamaların heap'lerini (RAM'lerini) burada ayıracağız
+    for(int i = 0; i < 1024; i++) {
+        if (page_directory[i] & 1) { // Eğer o bölge aktifse (Present bit == 1)
+            pd[i] = page_directory[i];
+        }
+    }
+    
+    return pd; // Görevin yepyeni ve bağımsız hafıza haritası hazır!
+}

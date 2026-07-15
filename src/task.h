@@ -17,7 +17,8 @@ typedef struct {
 
 #define MAX_FD_PER_TASK 8 // Bir uygulama aynı anda en fazla 8 dosya açabilir
 typedef struct task {
-    unsigned int esp;      
+    unsigned int esp;
+    unsigned int cr3;    
     unsigned int id;   
     unsigned int stack_base;    
     unsigned int app_base;     

@@ -116,20 +116,29 @@ timer_handler:
 
 .timer_find_next_task:
     ; 2. Sıradaki göreve geç: current_task = current_task->next
-    mov ebx, [eax + 16] 
+    mov ebx, [eax + 20]     ; DÜZELTİLDİ: Eskiden +16 yazıyordu, +20 olmalı!
     mov [current_task], ebx
     
-    ; 3. Sıradaki görevin State (Durum) değerini kontrol et (state = +20)
-    mov ecx, [ebx + 20]
+    ; 3. Sıradaki görevin State (Durum) değerini kontrol et (state = +24)
+    mov ecx, [ebx + 24]     ; DÜZELTİLDİ: Eskiden +20 yazıyordu, +24 olmalı!
     cmp ecx, 1              
     je .timer_skip_sleeping 
+    
+    ; ... (Altındaki pusha ve cr3 kısımları aynen kalacak) ...
     
     ; YENİ KORUMA: Sıradaki görev uyanıksa, Çekirdek Yığınını (ESP0) TSS'ye bildir!
     pusha
     call update_tss_esp0
     popa
 
-    ; 4. Görev uyanıksa (0), yeni görevin yığınını (ESP) işlemciye yükle
+    ; =========================================================
+    ; 4. İLLÜZYONU BAŞLAT: CR3 (HAFIZA HARİTASI) DEĞİŞİMİ!
+    ; =========================================================
+    mov edx, [ebx + 4]      ; Yeni görevin CR3 adresini al (Offset +4)
+    mov cr3, edx            ; İŞLEMCİNİN HAFIZA HARİTASINI ANINDA DEĞİŞTİR!
+    ; =========================================================
+
+    ; 5. Görev uyanıksa (0), yeni görevin yığınını (ESP) işlemciye yükle
     mov esp, [ebx]      
     jmp .no_timer_switch
 
@@ -312,11 +321,11 @@ yield_handler:
 
 .find_next_task:
     ; 2. Sıradaki göreve geç (next = +16)
-    mov ebx, [eax + 16] 
+    mov ebx, [eax + 20] 
     mov [current_task], ebx
     
     ; 3. Sıradaki görevin State (Durum) değerini kontrol et (state = +20)
-    mov ecx, [ebx + 20]
+    mov ecx, [ebx + 24]
     cmp ecx, 1          
     je .skip_sleeping   
     
@@ -325,7 +334,14 @@ yield_handler:
     call update_tss_esp0
     popa
 
-    ; 4. Görev uyanıksa (0), ESP'yi yükle ve çalıştır
+    ; =========================================================
+    ; 4. İLLÜZYONU BAŞLAT: CR3 (HAFIZA HARİTASI) DEĞİŞİMİ!
+    ; =========================================================
+    mov edx, [ebx + 4]      ; Yeni görevin CR3 adresini al (Offset +4)
+    mov cr3, edx            ; İŞLEMCİNİN HAFIZA HARİTASINI ANINDA DEĞİŞTİR!
+    ; =========================================================
+
+    ; 5. Görev uyanıksa (0), ESP'yi yükle ve çalıştır
     mov esp, [ebx]      
     jmp .no_yield_switch
 

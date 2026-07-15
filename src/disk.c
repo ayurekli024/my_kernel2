@@ -355,6 +355,23 @@ int vfs_open(const char* filename, const char* ext) {
         
         return free_fd;
     }
+    // YENİ: TCP Ağ Soketi (Örnek Olarak "example.com" Sunucusuna Sabitlendi)
+    if (strncmp(filename, "NET", 3) == 0 && strncmp(ext, "TCP", 3) == 0) {
+        current_task->fd_table[free_fd].is_open = 1;
+        current_task->fd_table[free_fd].type = 3; // 3 = TCP Ağ Soketi
+        
+        extern unsigned char tcp_dest_ip[];
+        extern int tcp_state;
+        extern void rtl8139_send_tcp(unsigned char, unsigned char*, int);
+        
+        // Dünyanın en standart test sunucusu olan example.com IP'si (93.184.216.34)
+        // Dünyanın en sağlam sunucusu: Google (142.250.187.46)
+        tcp_dest_ip[0] = 142; tcp_dest_ip[1] = 250; tcp_dest_ip[2] = 187; tcp_dest_ip[3] = 46;
+        tcp_state = 1; // SYN_SENT durumuna geç
+        
+        rtl8139_send_tcp(0x02, 0, 0); // Karşı sunucuya SYN (Merhaba) Paketi fırlat!
+        return free_fd;
+    }
 
     // Klasik FAT16 dizin arama kodu
     directory_entry_t root_dir[16]; 
@@ -404,6 +421,25 @@ int vfs_read(int fd, unsigned char* target_buffer, int count) {
         
         return 0;
     }
+    // YENİ: TCP Soketinden Veri Okuma
+    if (file->type == 3) {
+        extern int tcp_inbox_ready;
+        extern int tcp_inbox_size;
+        extern unsigned char tcp_inbox[];
+        extern int tcp_state;
+        
+        if (tcp_state != 2) return 0; // El sıkışma bitmediyse bekle
+        
+        if (tcp_inbox_ready) {
+            int to_copy = count < tcp_inbox_size ? count : tcp_inbox_size;
+            for(int i = 0; i < to_copy; i++) target_buffer[i] = tcp_inbox[i];
+            target_buffer[to_copy] = '\0';
+            tcp_inbox_ready = 0;
+            tcp_inbox_size = 0;
+            return to_copy;
+        }
+        return 0; // Veri gelene kadar bekle
+    }
     // Eğer Disk Dosyasıysa (type == 0), eski okuma mantığına devam et:
     if (file->offset >= file->size) return 0; 
     
@@ -437,6 +473,16 @@ int vfs_write(int fd, unsigned char* buffer, int count) {
         extern void rtl8139_send_udp(unsigned char*, unsigned short, unsigned short, unsigned char*, int);
         rtl8139_send_udp(file->target_ip, file->target_port, file->local_port, buffer, count);
         return count;
+    }
+    // TCP Soketi (Veriyi PSH | ACK bayraklarıyla yollar)
+    if (file->type == 3) {
+        extern int tcp_state;
+        extern void rtl8139_send_tcp(unsigned char, unsigned char*, int);
+        if (tcp_state == 2) { 
+            rtl8139_send_tcp(0x18, buffer, count); // 0x18 = PSH ve ACK bayrakları açık!
+            return count;
+        }
+        return -1;
     }
     
     return -1; // Disk dosyalarına yazma (şimdilik desteklenmiyor)

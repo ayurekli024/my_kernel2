@@ -1,37 +1,50 @@
 #include "ardaos.h"
-#include "libc.h" 
+#include "libc.h"
 
 __attribute__((section(".text.entry")))
 void _start(char* args) {
-    sys_create_window("Malloc RAM Testi", 450, 200);
-    printf("[ ISTEMCI ] Ufak Yigin (Stack) sinirlarindan kurtuluyoruz!");
+    sys_create_window("ArdaOS Web Tarayici", 450, 200);
+    printf("[ BROWSER ] Google sunucusuna baglaniliyor...");
 
-    // 1. Çekirdekten 100 Kilobaytlık Dev Bir RAM İste!
-    // Eğer bunu `char dev_dizi[100000];` olarak yapsaydık uygulama anında patlardı (Stack Overflow)
-    char* dev_buffer = (char*)malloc(100000); 
+    int socket_fd = sys_open("NET", "TCP");
     
-    if (dev_buffer != 0) {
-        printf("[ BASARILI ] Kernel 100 KB RAM tahsis etti! Adres: %d", (unsigned int)dev_buffer);
+    if (socket_fd >= 0) {
+        // HTTP GET İsteği (Artık Google'dan veri istiyoruz)
+        char* http_request = "GET / HTTP/1.1\r\nHost: www.google.com\r\nConnection: close\r\n\r\n";
         
-        // Belleğe yazma testi yapalım (Eğer sayfalama engellerse Zeki Cellat vurur!)
-        dev_buffer[0] = 'M';
-        dev_buffer[1] = 'e';
-        dev_buffer[2] = 'r';
-        dev_buffer[3] = 'h';
-        dev_buffer[4] = 'a';
-        dev_buffer[5] = 'b';
-        dev_buffer[6] = 'a';
-        dev_buffer[7] = '\0';
+        // VFS, bağlantı (SYN-ACK) kurulana kadar boşluk dönecek. Kurulduğunda veriyi fırlatacağız!
+        int zaman_asimi = 0;
+        int istek_yollandi = 0;
         
-        printf("Bellek Testi Basarili. Icerik: %s", dev_buffer);
+        // Çekirdeğin libc'deki malloc ile bize tahsis edeceği devasa yanıt belleği
+        char* gelen_html = (char*)malloc(8192); 
         
-        // İşimiz bittiğinde mutlaka belleği iade etmeliyiz ki sistem sızdırmasın (Memory Leak)
-        free(dev_buffer);
-        printf("[ BASARILI ] Dev bellek blogu Kernel'e geri iade edildi.");
+        while(zaman_asimi < 500000) { 
+            // Eğer henüz isteği yollamadıysak yollamayı dene (Bağlantı ESTABLISHED olunca yollar)
+            if (istek_yollandi == 0) {
+                if (sys_write(socket_fd, (unsigned char*)http_request, strlen(http_request)) > 0) {
+                    printf("[ BROWSER ] TCP El Sikismasi Tamam! HTTP GET Istegi Yollandi!");
+                    istek_yollandi = 1;
+                }
+            } else {
+                // İstek yollandıysa HTML yanıtını beklemeye başla
+                int okunan = sys_read(socket_fd, (unsigned char*)gelen_html, 8192);
+                if (okunan > 0) {
+                    printf("========== GELEN HTML VERISI ==========");
+                    printf(gelen_html);
+                    printf("=======================================");
+                    break;
+                }
+            }
+            sys_yield();
+            zaman_asimi++;
+        }
         
-    } else {
-        printf("[ HATA ] Malloc RAM tahsis edemedi!");
-    }
+        if (zaman_asimi >= 500000) printf("[ HATA ] Sunucu yanit vermedi.");
+        
+        free(gelen_html);
+        sys_close(socket_fd);
+    } 
     
     sys_exit();
     while(1);

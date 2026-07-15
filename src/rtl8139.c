@@ -17,6 +17,20 @@ unsigned char* rx_buffer;
 unsigned char udp_inbox[2048];
 int udp_inbox_size = 0;
 volatile int udp_inbox_ready = 0;
+// ==========================================
+// YENİ: TCP MOTORU DURUM DEĞİŞKENLERİ
+// ==========================================
+unsigned char tcp_dest_ip[4] = {0};
+unsigned short tcp_dest_port = 80; // HTTP Portu
+unsigned short tcp_local_port = 55556;
+unsigned int tcp_seq = 0x11223344; // Bizim Sıra Numaramız (Rastgele başlar)
+unsigned int tcp_ack = 0;          // Karşı Tarafın Bize Yolladığı Sıra
+int tcp_state = 0; // 0: KAPALI, 1: SYN_SENT, 2: ESTABLISHED
+unsigned char tcp_inbox[8192]; // Gelen HTML kodlarını tutacağımız dev depo
+int tcp_inbox_size = 0;
+volatile int tcp_inbox_ready = 0;
+
+void rtl8139_send_tcp(unsigned char flags, unsigned char* data, int data_len);
 
 void init_rtl8139() {
     unsigned char bus, slot;
@@ -162,7 +176,44 @@ void rtl8139_handler_main() {
                 udp_inbox_ready = 1; // VFS'ye "Veri Hazır" bayrağını çek
 
                 strcat(msg, " Bayt - [ UDP SOKET VERISI ALINDI! ]");
-            } 
+            }
+            else if (packet[23] == 0x06) { // Protokol TCP (6) ise!
+                int ip_hdr_len = (packet[14] & 0x0F) * 4;
+                int tcp_hdr_start = 14 + ip_hdr_len;
+                unsigned char flags = packet[tcp_hdr_start + 13];
+                
+                unsigned int incoming_seq = (packet[tcp_hdr_start+4]<<24) | (packet[tcp_hdr_start+5]<<16) | (packet[tcp_hdr_start+6]<<8) | packet[tcp_hdr_start+7];
+                
+                if ((flags & 0x02) && (flags & 0x10)) { // SYN-ACK (Bağlantı Kabul Edildi!)
+                    tcp_ack = incoming_seq + 1; 
+                    tcp_state = 2; // DURUM: ESTABLISHED (Bağlandı!)
+                    rtl8139_send_tcp(0x10, 0, 0); // Karşıya "Aldım" (ACK) paketi fırlat
+                    strcat(msg, " Bayt - [ TCP SYN-ACK ALINDI, EL SIKISILDI! ]");
+                } 
+                else if (flags & 0x08) { // PSH (İçinde HTTP Verisi Var!)
+                    int tcp_hdr_len = (packet[tcp_hdr_start + 12] >> 4) * 4;
+                    int data_start = tcp_hdr_start + tcp_hdr_len;
+                    int total_len = (packet[16]<<8) | packet[17];
+                    int data_len = total_len - ip_hdr_len - tcp_hdr_len;
+                    
+                    if (data_len > 0) {
+                        tcp_ack = incoming_seq + data_len;
+                        for(int i=0; i<data_len; i++) tcp_inbox[tcp_inbox_size++] = packet[data_start+i];
+                        tcp_inbox[tcp_inbox_size] = '\0';
+                        tcp_inbox_ready = 1; // Uygulamayı uyar!
+                        
+                        rtl8139_send_tcp(0x10, 0, 0); // Veriyi aldığımıza dair ACK fırlat
+                    }
+                    strcat(msg, " Bayt - [ TCP VERISI (HTTP) ALINDI! ]");
+                }
+                else {
+                    // YENİ: Anlaşılmayan tüm bayrakları (Örn: RST-ACK olan 20'yi) ekrana bas!
+                    strcat(msg, " Bayt - [ TCP BAYRAK: ");
+                    char f_str[10]; itoa(flags, f_str);
+                    strcat(msg, f_str);
+                    strcat(msg, " ]");
+                }
+            }
             else {
                 strcat(msg, " Bayt (Tur: IPv4 Diger)");
             }
@@ -270,4 +321,81 @@ void rtl8139_send_udp(unsigned char* dest_ip, unsigned short dest_port, unsigned
     outl(rtl_io_base + 0x20 + (tx_descriptor * 4), (unsigned int)tx_buffer);
     outl(rtl_io_base + 0x10 + (tx_descriptor * 4), total_len);
     tx_descriptor = (tx_descriptor + 1) % 4;
+}
+// ==========================================
+// YENİ: TCP PAKET ÜRETİCİSİ VE GÖNDERİCİSİ
+// ==========================================
+void rtl8139_send_tcp(unsigned char flags, unsigned char* data, int data_len) {
+    if (tx_buffer == 0) tx_buffer = (unsigned char*)dma_alloc(2048);
+    
+    // GÜVENLİK AĞI: Eğer ARP çözülmediyse (ping atılmadıysa) iptal et
+    if (arp_resolved == 0) return; 
+
+    static unsigned char packet[2048];
+    for (int i = 0; i < 2048; i++) packet[i] = 0;
+
+    int tcp_len = 20 + data_len;
+    int ip_len = 20 + tcp_len;     // KRİTİK: Gerçek IP Boyutu (Padding HARİÇ!)
+    int frame_len = 14 + ip_len;   // Donanım için toplam çerçeve boyutu
+    
+    // Donanım (Ethernet) minimum 60 bayt ister, fazlasını sıfırlarla (padding) doldururuz
+    if (frame_len < 60) frame_len = 60; 
+
+    // 1. ETHERNET BAŞLIĞI
+    for(int i=0; i<6; i++) packet[i] = router_mac[i];
+    for(int i=0; i<6; i++) packet[6+i] = mac_address[i];
+    packet[12] = 0x08; packet[13] = 0x00;
+
+    // 2. IPv4 BAŞLIĞI (Tuzak Buradaydı! Artık saf ip_len kullanıyoruz)
+    // 2. IPv4 BAŞLIĞI
+    packet[14] = 0x45; packet[15] = 0x00;
+    packet[16] = ip_len >> 8; 
+    packet[17] = ip_len & 0xFF;
+    packet[18] = 0x12; packet[19] = 0x34; // YENİ: ID 0 Olmasın! Rastgele bir kimlik atadık
+    packet[20] = 0x40; packet[21] = 0x00; // YENİ: DF (Don't Fragment) Bayrağı
+    packet[22] = 0x40; packet[23] = 0x06;
+    
+    unsigned char src_ip[4] = {10, 0, 2, 15};
+    for(int i=0; i<4; i++) { packet[26+i] = src_ip[i]; packet[30+i] = tcp_dest_ip[i]; }
+    
+    unsigned short ip_csum = net_checksum(&packet[14], 20);
+    packet[24] = ip_csum >> 8; packet[25] = ip_csum & 0xFF;
+
+    // 3. TCP BAŞLIĞI
+    packet[34] = tcp_local_port >> 8; packet[35] = tcp_local_port & 0xFF;
+    packet[36] = tcp_dest_port >> 8;  packet[37] = tcp_dest_port & 0xFF;
+    
+    packet[38] = (tcp_seq >> 24) & 0xFF; packet[39] = (tcp_seq >> 16) & 0xFF;
+    packet[40] = (tcp_seq >> 8) & 0xFF;  packet[41] = tcp_seq & 0xFF;
+    
+    packet[42] = (tcp_ack >> 24) & 0xFF; packet[43] = (tcp_ack >> 16) & 0xFF;
+    packet[44] = (tcp_ack >> 8) & 0xFF;  packet[45] = tcp_ack & 0xFF;
+    
+    packet[46] = 0x50; 
+    packet[47] = flags; 
+    packet[48] = 0xFA; packet[49] = 0xF0; 
+    
+    for(int i=0; i<data_len; i++) packet[54+i] = data[i];
+
+    // TCP CHECKSUM (Bu hesaplama ip_len kullanılarak yapıldığı için artık kusursuz!)
+    unsigned int csum = 0;
+    csum += (src_ip[0]<<8)|src_ip[1]; csum += (src_ip[2]<<8)|src_ip[3];
+    csum += (tcp_dest_ip[0]<<8)|tcp_dest_ip[1]; csum += (tcp_dest_ip[2]<<8)|tcp_dest_ip[3];
+    csum += 0x0006; csum += tcp_len;
+    for(int i=0; i<tcp_len; i+=2) {
+        unsigned short word = (packet[34+i]<<8) | (i+1 < tcp_len ? packet[34+i+1] : 0);
+        csum += word;
+    }
+    while(csum >> 16) csum = (csum & 0xFFFF) + (csum >> 16);
+    csum = ~csum;
+    packet[50] = csum >> 8; packet[51] = csum & 0xFF;
+
+    // Donanıma Gönder
+    for(int i=0; i<frame_len; i++) tx_buffer[i] = packet[i];
+    outl(rtl_io_base + 0x20 + (tx_descriptor * 4), (unsigned int)tx_buffer);
+    outl(rtl_io_base + 0x10 + (tx_descriptor * 4), frame_len);
+    tx_descriptor = (tx_descriptor + 1) % 4;
+    
+    if (data_len > 0) tcp_seq += data_len;
+    else if (flags & 0x02 || flags & 0x01) tcp_seq += 1;
 }

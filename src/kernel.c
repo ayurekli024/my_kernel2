@@ -292,9 +292,53 @@ void draw_window(window_t* win) {
 
 void draw_desktop(unsigned int desktop_bg) {
     draw_rect(0, 0, 1024, 768, desktop_bg); 
-    draw_rect(0, 728, 1024, 40, 0x00111A);  
 }
+void draw_taskbar() {
+    // 1. Zemin: Görev çubuğunun arka planı
+    draw_rect(0, 728, 1024, 40, 0x00111A);
+    
+    // 2. SAĞ BÖLGE: Canlı Saat
+    unsigned char h = bcd_to_bin(get_rtc_register(0x04));
+    h = (h + 3) % 24; // GMT+3 Türkiye Saati
+    unsigned char m = bcd_to_bin(get_rtc_register(0x02));
+    
+    char hs[10], ms[10];
+    itoa(h, hs); itoa(m, ms);
+    
+    char time_str[16] = "";
+    if (h < 10) strcat(time_str, "0");
+    strcat(time_str, hs);
+    strcat(time_str, ":");
+    if (m < 10) strcat(time_str, "0");
+    strcat(time_str, ms);
+    
+    // Saati sağ alt köşeye (X:960, Y:740) yaz
+    draw_string(960, 740, time_str, 0x00FFFFFF, 0x00111A);
 
+    // 3. ORTA BÖLGE: Açık Pencerelerin Butonları
+    int btn_x = 150; // Sol tarafı (0-150) Başlat Menüsü için boş bıraktık
+    for (int i = 0; i < MAX_WINDOWS; i++) {
+        if (windows[i].is_open) {
+            // Aktif olan pencerenin butonu ArdaOS Mavisi, diğerleri koyu gri olsun
+            unsigned int btn_color = (i == focused_window) ? 0x000078D7 : 0x00333333;
+            
+            draw_rect(btn_x, 732, 120, 32, btn_color);
+            
+            // Pencere isminin ilk birkaç harfini butonun içine yaz
+            char short_title[12];
+            int t = 0;
+            while(windows[i].title[t] != '\0' && t < 10) {
+                short_title[t] = windows[i].title[t];
+                t++;
+            }
+            short_title[t] = '\0';
+            
+            draw_string(btn_x + 10, 742, short_title, 0x00FFFFFF, btn_color);
+            
+            btn_x += 130; // Bir sonraki buton için X'i sağa kaydır
+        }
+    }
+}
 void render_gui() {
     if (!force_redraw) return;
     
@@ -379,6 +423,7 @@ void render_gui() {
         // Pencere içerik çizimi bitti, dışarıya taşma zırhını kaldır:
         reset_clipping_rect();
     }
+    draw_taskbar();
     draw_cursor(mouse_x, mouse_y);
     swap_buffers();
 }
@@ -502,7 +547,29 @@ void process_mouse_events() {
         add_dirty_rect(last_mouse_x, last_mouse_y, 16, 16);
 
         if (mouse_left_button) {
-            if (!any_window_dragging) { 
+            if (!any_window_dragging) {
+                if (mouse_y >= 728) {
+                    if (mouse_x >= 150 && mouse_x < 930) { // Butonların olduğu bölge
+                        int btn_index = (mouse_x - 150) / 130;
+                        int current_idx = 0;
+                        
+                        for (int i = 0; i < MAX_WINDOWS; i++) {
+                            if (windows[i].is_open) {
+                                if (current_idx == btn_index) {
+                                    if (focused_window != i) {
+                                        focused_window = i; 
+                                        force_redraw = 1; // Z-Order değişti, ekranı tazele!
+                                    }
+                                    break;
+                                }
+                                current_idx++;
+                            }
+                        }
+                    }
+                    // Görev çubuğuna tıklandıysa masaüstü pencerelerini algılamayı es geç
+                    last_mouse_x = mouse_x; last_mouse_y = mouse_y;
+                    return; 
+                } 
                 int clicked_window = -1;
                 if (windows[focused_window].is_open &&
                     mouse_x >= windows[focused_window].x && mouse_x <= windows[focused_window].x + windows[focused_window].w &&

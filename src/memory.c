@@ -89,8 +89,8 @@ void* api_get_shared_memory(void) {
 // DMA (DOĞRUDAN BELLEK ERİŞİMİ) YÖNETİCİSİ - AĞ KARTI İÇİN
 // ============================================================================
 // RTL8139 gelen paketleri çekirdeği yormadan doğrudan RAM'e yazar.
-// Bunun için 3. MB (0x300000) civarında, fiziksel olarak ardışık bir alan ayırıyoruz.
-unsigned int dma_memory_pointer = 0x300000; 
+// Bunun için 6. MB (0x600000) civarında, fiziksel olarak ardışık bir alan ayırıyoruz.
+unsigned int dma_memory_pointer = 0x600000; 
 
 void* dma_alloc(unsigned int size) {
     void* ptr = (void*)dma_memory_pointer;
@@ -209,22 +209,40 @@ void free(void* ptr) {
 extern unsigned int page_directory[1024];
 
 // Yeni bir görev için tamamen bağımsız bir Sayfa Dizini (CR3) oluşturur
-unsigned int* create_task_page_dir() {
-    // PMM'den fiziksel 4KB'lık temiz bir sayfa al
-    unsigned int* pd = (unsigned int*)pmm_alloc_block();
-    
-    // Önce tüm haritayı "Kullanılmıyor" (Not Present - 0x02) olarak işaretle
-    for(int i = 0; i < 1024; i++) {
-        pd[i] = 0x00000002; 
-    }
+// ==========================================
+// YENİ: UYGULAMALAR İÇİN İZOLE FİZİKSEL BELLEK (PER-PROCESS PAGING)
+// ==========================================
+// 8 Görev için statik tablo ve fiziksel RAM havuzu ayırıyoruz
+unsigned int task_page_dirs[8][1024] __attribute__((aligned(4096)));
+unsigned int task_page_tables[8][1024] __attribute__((aligned(4096)));
+int next_task_id = 0;
 
-    // Çekirdeğin hayati yapılarını (İlk 4MB, VBE Ekran, IPC) yeni haritaya klonla
-    // İleriki aşamalarda uygulamaların heap'lerini (RAM'lerini) burada ayıracağız
+unsigned int* create_task_page_dir() {
+    if (next_task_id >= 8) return (unsigned int*)page_directory; 
+    
+    unsigned int* pd = task_page_dirs[next_task_id];
+    unsigned int* pt = task_page_tables[next_task_id];
+    
+    // 1. Çekirdek haritasını klonla (Kernel Heap, pd[1] dahil artık TAMAMEN güvende!)
     for(int i = 0; i < 1024; i++) {
-        if (page_directory[i] & 1) { // Eğer o bölge aktifse (Present bit == 1)
-            pd[i] = page_directory[i];
-        }
+        pd[i] = page_directory[i];
     }
     
-    return pd; // Görevin yepyeni ve bağımsız hafıza haritası hazır!
+    // 2. 32. Megabayt alanını (8. İndeks) temizle
+    for(int i = 0; i < 1024; i++) {
+        pt[i] = 0x00000002; // Not Present
+    }
+    
+    // 3. FİZİKSEL AYRIŞTIRMA (Fiziksel RAM hala 12. MB'dan veriliyor)
+    unsigned int phys_start = 0xC00000 + (next_task_id * 0x100000); 
+    
+    for(int i = 0; i < 256; i++) { // 1 MB alan = 256 Sayfa (4KB)
+        pt[i] = (phys_start + (i * 4096)) | 7; // User | RW | Present
+    }
+    
+    // 4. YENİ: İzole tabloyu pd[1] yerine 8. İndekse (32. MB Sanal Adres) bağla!
+    pd[8] = ((unsigned int)pt) | 7;
+    
+    next_task_id++;
+    return pd;
 }

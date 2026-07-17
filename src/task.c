@@ -68,20 +68,27 @@ int create_task(void (*func)(void), unsigned int app_base, char* args) {
     extern unsigned int page_directory[1024];
     if (is_user) {
         new_task->cr3 = (unsigned int)create_task_page_dir();
-        
-        // --- ELF YÜKLEYİCİ İÇİN DONANIMSAL CR3 GEÇİŞİ ---
+        // --- ELF YÜKLEYİCİ İÇİN KESİNTİSİZ VE GÜVENLİ CR3 GEÇİŞİ ---
         unsigned int kernel_cr3;
-        __asm__ __volatile__("mov %%cr3, %0" : "=r"(kernel_cr3)); // Orijinal haritayı kaydet
-        __asm__ __volatile__("mov %0, %%cr3" : : "r"(new_task->cr3)); // Uygulamanın boyutuna geç
+        
+        // ZIRH: Saat kesmesi (Timer) araya girip CR3'ü bozmasın diye durduruyoruz!
+        __asm__ __volatile__("cli"); 
+        
+        // YENI: "memory" clobber'i eklenerek GCC'nin kodlarin sirasini bozmasi engellendi
+        __asm__ __volatile__("mov %%cr3, %0" : "=r"(kernel_cr3) : : "memory"); 
+        __asm__ __volatile__("mov %0, %%cr3" : : "r"(new_task->cr3) : "memory");
 
         unsigned int actual_entry_point = (unsigned int)func;
         unsigned int elf_entry = load_elf_segments((unsigned char*)app_base);
         if (elf_entry != 0) {
-            actual_entry_point = elf_entry; // Dosya ELF ise başlangıç adresi başlık içinden gelir!
+            actual_entry_point = elf_entry; 
         }
 
-        __asm__ __volatile__("mov %0, %%cr3" : : "r"(kernel_cr3)); // Çekirdek haritasına güvenle geri dön!
-        // ------------------------------------------------
+        __asm__ __volatile__("mov %0, %%cr3" : : "r"(kernel_cr3)); 
+        
+        // TEHLİKE GEÇTİ: Kesmeleri (Multitasking) tekrar başlat!
+        __asm__ __volatile__("sti"); 
+        // -----------------------------------------------------------
         
         unsigned int* user_stack_top = (unsigned int*)(new_task->stack_base + 3072);
         *(--user_stack_top) = (unsigned int)target_args;
@@ -161,9 +168,9 @@ void kill_task_by_id(int task_id) {
             }
             
             // 2. Harici uygulama ise (PID >= 2), 4 KB'lık Kod belleğini iade et
-            if (target->id >= 2 && target->app_base != 0) {
-                free((void*)target->app_base);
-            }
+            //if (target->id >= 2 && target->app_base != 0) {
+            //    free((void*)target->app_base);
+            //}
             
             // 3. Görevin kendi kayıt bloğunu (task_t) sistemden sil
             free(target);

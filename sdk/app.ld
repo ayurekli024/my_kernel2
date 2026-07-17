@@ -1,20 +1,20 @@
 OUTPUT_FORMAT("elf32-i386")
-ENTRY(main) /* ELF başlığına eklenecek ilk giriş noktası */
+ENTRY(_start) 
 
 SECTIONS
 {
-    . = 0x400000; /* Uygulamaların yeni ortak sanal evreni! */
+    . = 0x2000000; /* Yeniden 32. MB (Sanal Adres) - Kernel'den çok uzakta! */
     
-    .text : ALIGN(4096) {
+    .text : {
         *(.text*)
         *(.rodata*)
     }
     
-    .data : ALIGN(4096) {
+    .data : {
         *(.data*)
     }
     
-    .bss : ALIGN(4096) {
+    .bss : {
         *(.bss*)
         *(COMMON)
     }

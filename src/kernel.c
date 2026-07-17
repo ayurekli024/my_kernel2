@@ -14,7 +14,8 @@
 unsigned int* vesa_framebuffer;
 extern void outb(unsigned short port, unsigned char data);
 extern unsigned char inb(unsigned short port);
-
+// ELF dosyaları için güvenli (Gölge haritada kaybolmayan) statik disk okuma alanı
+unsigned char elf_load_buffer[65536];
 // ==========================================
 // 1. GLOBAL DEĞİŞKENLER VE DURUM YÖNETİMİ
 // ==========================================
@@ -444,6 +445,7 @@ void execute_command(char* cmd) {
     // ========================================================
     // İlk kelime ".bin" veya ".BIN" ile bitiyorsa
     // DİNAMİK UYGULAMA YÜKLEYİCİ (Parametre ve ELF Destekli)
+    // DİNAMİK UYGULAMA YÜKLEYİCİ (Parametre ve ELF Destekli)
     else if (fw_len > 4 && 
             (strcmp(first_word + fw_len - 4, ".bin") == 0 || strcmp(first_word + fw_len - 4, ".BIN") == 0 ||
              strcmp(first_word + fw_len - 4, ".elf") == 0 || strcmp(first_word + fw_len - 4, ".ELF") == 0)) {
@@ -454,7 +456,7 @@ void execute_command(char* cmd) {
         
         char target_ext[4];
         if (first_word[fw_len - 1] == 'n' || first_word[fw_len - 1] == 'N') strcpy(target_ext, "BIN");
-        else strcpy(target_ext, "ELF"); // FAT16 için doğru uzantıyı belirle
+        else strcpy(target_ext, "ELF"); 
 
         char fat_name[9] = "        "; 
         for(int i = 0; i < 8 && raw_name[i] != '\0'; i++) {
@@ -463,26 +465,22 @@ void execute_command(char* cmd) {
         }
         fat_name[8] = '\0';
 
-        // ELF dosyaları blok hizalamaları yüzünden 4 KB'ı aşabilir, limiti yükselttik
-        unsigned char* app_memory = (unsigned char*)malloc(16384); 
-        if (app_memory != 0) {
-            int file_size = ardaos_read_file(fat_name, target_ext, app_memory);
-            if (file_size > 0) {
-                // create_task artık arka planda CR3'ü büküp kendi ELF kontrolünü yapacak!
-                create_task((void (*)())app_memory, (unsigned int)app_memory, app_args);
-                
-                strcpy(terminal_response, "[ SISTEM ] ");
-                strcat(terminal_response, raw_name);
-                if (app_args[0] != '\0') strcat(terminal_response, " argumanlarla baslatildi.");
-                else strcat(terminal_response, " baslatildi.");
-            } else {
-                free(app_memory);
-                strcpy(terminal_response, "Hata: ");
-                strcat(terminal_response, first_word);
-                strcat(terminal_response, " diskte bulunamadi.");
-            }
+        // ========================================================
+        // YENİ: Malloc YERİNE Güvenli Statik Buffer Kullanıyoruz!
+        // ========================================================
+        int file_size = ardaos_read_file(fat_name, target_ext, elf_load_buffer);
+        if (file_size > 0) {
+            // Kodlar statik alandan okunup uygulamanın 12. MB'daki yeni izole evrenine kopyalanacak
+            create_task((void (*)())elf_load_buffer, (unsigned int)elf_load_buffer, app_args);
+            
+            strcpy(terminal_response, "[ SISTEM ] ");
+            strcat(terminal_response, raw_name);
+            if (app_args[0] != '\0') strcat(terminal_response, " argumanlarla baslatildi.");
+            else strcat(terminal_response, " baslatildi.");
         } else {
-            strcpy(terminal_response, "Hata: Uygulama baslatmak icin yetersiz RAM!");
+            strcpy(terminal_response, "Hata: ");
+            strcat(terminal_response, first_word);
+            strcat(terminal_response, " diskte bulunamadi.");
         }
     }
     else if (strcmp(cmd, "renk mavi") == 0) {

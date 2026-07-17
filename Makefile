@@ -47,37 +47,38 @@ $(ISO_TARGET): $(TARGET) grub.cfg
 sdk/libc.o: sdk/libc.c
 	$(CC) $(APP_CFLAGS) -c sdk/libc.c -o sdk/libc.o
 
-yilan.bin: sdk/yilan.c sdk/libc.o
+yilan.elf: sdk/yilan.c sdk/libc.o
 	$(CC) $(APP_CFLAGS) -c sdk/yilan.c -o sdk/yilan.o
-	ld -m elf_i386 -T sdk/app.ld sdk/yilan.o sdk/libc.o -o yilan.bin
+	ld -m elf_i386 -T sdk/app.ld sdk/yilan.o sdk/libc.o -o yilan.elf
 
-okuyucu.bin: sdk/okuyucu.c sdk/libc.o
+okuyucu.elf: sdk/okuyucu.c sdk/libc.o
 	$(CC) $(APP_CFLAGS) -c sdk/okuyucu.c -o sdk/okuyucu.o
-	ld -m elf_i386 -T sdk/app.ld sdk/okuyucu.o sdk/libc.o -o okuyucu.bin
+	ld -m elf_i386 -T sdk/app.ld sdk/okuyucu.o sdk/libc.o -o okuyucu.elf
 
-bomba.bin: sdk/bomba.c sdk/libc.o
+bomba.elf: sdk/bomba.c sdk/libc.o
 	$(CC) $(APP_CFLAGS) -c sdk/bomba.c -o sdk/bomba.o
-	ld -m elf_i386 -T sdk/app.ld sdk/bomba.o sdk/libc.o -o bomba.bin
+	ld -m elf_i386 -T sdk/app.ld sdk/bomba.o sdk/libc.o -o bomba.elf
 
-kedi.bin: sdk/kedi.c sdk/libc.o
+kedi.elf: sdk/kedi.c sdk/libc.o
 	$(CC) $(APP_CFLAGS) -c sdk/kedi.c -o sdk/kedi.o
-	ld -m elf_i386 -T sdk/app.ld sdk/kedi.o sdk/libc.o -o kedi.bin
+	ld -m elf_i386 -T sdk/app.ld sdk/kedi.o sdk/libc.o -o kedi.elf
 
-daktilo.bin: sdk/daktilo.c sdk/libc.o
+daktilo.elf: sdk/daktilo.c sdk/libc.o
 	$(CC) $(APP_CFLAGS) -c sdk/daktilo.c -o sdk/daktilo.o
-	ld -m elf_i386 -T sdk/app.ld sdk/daktilo.o sdk/libc.o -o daktilo.bin
+	ld -m elf_i386 -T sdk/app.ld sdk/daktilo.o sdk/libc.o -o daktilo.elf
 
-istemci.bin: sdk/istemci.c sdk/libc.o
+istemci.elf: sdk/istemci.c sdk/libc.o
 	$(CC) $(APP_CFLAGS) -c sdk/istemci.c -o sdk/istemci.o
-	ld -m elf_i386 -T sdk/app.ld sdk/istemci.o sdk/libc.o -o istemci.bin
+	ld -m elf_i386 -T sdk/app.ld sdk/istemci.o sdk/libc.o -o istemci.elf
+
 # 4. Aşama: Uygulamaları FAT16 Diske (c.img) Enjekte Etme
-disk: yilan.bin okuyucu.bin bomba.bin kedi.bin daktilo.bin istemci.bin
-	mcopy -o -i c.img yilan.bin ::/YILAN.BIN
-	mcopy -o -i c.img okuyucu.bin ::/OKUYUCU.BIN
-	mcopy -o -i c.img bomba.bin ::/BOMBA.BIN
-	mcopy -o -i c.img kedi.bin ::/KEDI.BIN
-	mcopy -o -i c.img daktilo.bin ::/DAKTILO.BIN
-	mcopy -o -i c.img istemci.bin ::/ISTEMCI.BIN
+disk: yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf
+	mcopy -o -i c.img yilan.elf ::/YILAN.ELF
+	mcopy -o -i c.img okuyucu.elf ::/OKUYUCU.ELF
+	mcopy -o -i c.img bomba.elf ::/BOMBA.ELF
+	mcopy -o -i c.img kedi.elf ::/KEDI.ELF
+	mcopy -o -i c.img daktilo.elf ::/DAKTILO.ELF
+	mcopy -o -i c.img istemci.elf ::/ISTEMCI.ELF
 
 # 5. Aşama: QEMU'yu başlat (Başlamadan önce ISO ve disk otomatik güncellenir)
 run: $(ISO_TARGET) disk
@@ -85,5 +86,5 @@ run: $(ISO_TARGET) disk
 
 # Temizlik
 clean:
-	rm -f src/*.o sdk/*.o $(TARGET) $(ISO_TARGET) yilan.bin okuyucu.bin bomba.bin kedi.bin daktilo.bin istemci.bin
+	rm -f src/*.o sdk/*.o $(TARGET) $(ISO_TARGET) yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf
 	rm -rf isodir

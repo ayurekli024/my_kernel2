@@ -68,4 +68,31 @@ static inline void* sys_malloc(unsigned int size) {
 static inline void sys_free(void* ptr) {
     __asm__ __volatile__ ("int $0x80" : : "a"(20), "b"((unsigned int)ptr));
 }
+static inline int sys_exec(const char* name, const char* args) {
+    int pid; __asm__ __volatile__ ("int $0x80" : "=a"(pid) : "a"(21), "b"((unsigned int)name), "c"((unsigned int)args)); return pid;
+}
+static inline int sys_get_cmd(char* buffer) {
+    int ready; __asm__ __volatile__ ("int $0x80" : "=a"(ready) : "a"(22), "b"((unsigned int)buffer)); return ready;
+}
+static inline void sys_get_process_list(char* buffer) {
+    __asm__ __volatile__ ("int $0x80" : : "a"(23), "b"((unsigned int)buffer));
+}
+static inline void sys_clear_terminal() {
+    __asm__ __volatile__ ("int $0x80" : : "a"(24));
+}
+static inline void sys_kill(int pid) {
+    __asm__ __volatile__ ("int $0x80" : : "a"(25), "b"(pid));
+}
+static inline int sys_delete_file(const char* name, const char* ext) {
+    int ret; __asm__ __volatile__ ("int $0x80" : "=a"(ret) : "a"(26), "b"((unsigned int)name), "c"((unsigned int)ext)); return ret;
+}
+static inline int sys_create_dir(const char* name) {
+    int ret; __asm__ __volatile__ ("int $0x80" : "=a"(ret) : "a"(27), "b"((unsigned int)name)); return ret;
+}
+static inline void sys_list_files(char* buffer) {
+    __asm__ __volatile__ ("int $0x80" : : "a"(28), "b"((unsigned int)buffer));
+}
+static inline void sys_system_action(int action_id, char* buffer) {
+    __asm__ __volatile__ ("int $0x80" : : "a"(29), "b"(action_id), "c"((unsigned int)buffer));
+}
 #endif

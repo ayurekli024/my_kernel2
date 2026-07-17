@@ -294,6 +294,110 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         free((void*)arg1);
         return 0;
     }
+    // API 21: sys_exec (Uygulama Baslat)
+    else if (sys_num == 21) {
+        extern int api_exec_app(const char*, const char*);
+        unsigned int base = current_task->app_base;
+        const char* real_name = (unsigned int)arg1 < 0x100000 ? (const char*)(base + arg1) : (const char*)arg1;
+        const char* real_args = (unsigned int)arg2 < 0x100000 ? (const char*)(base + arg2) : (const char*)arg2;
+        return api_exec_app(real_name, real_args);
+    }
+    // API 22: sys_get_cmd (Kullanıcının terminale yazdığı komutu çek)
+    else if (sys_num == 22) {
+        extern volatile int command_ready;
+        extern char pending_command[];
+        if (!command_ready) return 0;
+        
+        unsigned int base = current_task->app_base;
+        char* real_buf = (unsigned int)arg1 < 0x100000 ? (char*)(base + arg1) : (char*)arg1;
+        extern void strcpy(char*, const char*);
+        strcpy(real_buf, pending_command);
+        command_ready = 0; // Komut okundu, depoyu boşalt
+        return 1;
+    }
+    // API 23: sys_get_process_list (Görev Yöneticisi)
+    else if (sys_num == 23) {
+        extern void get_process_list(char*);
+        unsigned int base = current_task->app_base;
+        char* real_buf = (unsigned int)arg1 < 0x100000 ? (char*)(base + arg1) : (char*)arg1;
+        get_process_list(real_buf);
+        return 1;
+    }
+    // API 24: sys_clear_terminal
+    else if (sys_num == 24) {
+        extern void api_clear_terminal(void);
+        api_clear_terminal();
+        return 1;
+    }
+    // API 25: sys_kill_task
+    else if (sys_num == 25) {
+        extern int task_to_kill;
+        task_to_kill = arg1; // Ana döngüdeki cellat motorunu tetikler
+        return 1;
+    }
+    // API No 26: sys_delete_file (Dosya Sil)
+    else if (sys_num == 26) {
+        extern int ardaos_delete_file(const char*, const char*);
+        unsigned int base = current_task->app_base;
+        const char* real_name = (unsigned int)arg1 < 0x100000 ? (const char*)(base + arg1) : (const char*)arg1;
+        const char* real_ext = (unsigned int)arg2 < 0x100000 ? (const char*)(base + arg2) : (const char*)arg2;
+        return ardaos_delete_file(real_name, real_ext);
+    }
+    // API No 27: sys_create_dir (Klasör Aç)
+    else if (sys_num == 27) {
+        extern int ardaos_create_dir(const char*);
+        unsigned int base = current_task->app_base;
+        const char* real_name = (unsigned int)arg1 < 0x100000 ? (const char*)(base + arg1) : (const char*)arg1;
+        return ardaos_create_dir(real_name);
+    }
+    // API No 28: sys_list_files (Disk İçeriği)
+    else if (sys_num == 28) {
+        extern void ardaos_list_files(char*);
+        unsigned int base = current_task->app_base;
+        char* real_buf = (unsigned int)arg1 < 0x100000 ? (char*)(base + arg1) : (char*)arg1;
+        ardaos_list_files(real_buf);
+        return 1;
+    }
+    // API No 29: sys_system_action (Donanım ve Çekirdek Kısayolları Motoru)
+    else if (sys_num == 29) {
+        unsigned int base = current_task->app_base;
+        char* real_buf = (unsigned int)arg2 < 0x100000 ? (char*)(base + arg2) : (char*)arg2;
+        
+        if (arg1 == 1) { extern void beep(void); beep(); }
+        else if (arg1 == 2) { 
+            extern void play_sound(unsigned int); extern void sleep(unsigned int); extern void nosound(void);
+            play_sound(659); sleep(150); nosound(); sleep(50); play_sound(659); sleep(150); nosound(); sleep(150);
+            play_sound(659); sleep(150); nosound(); sleep(150); play_sound(523); sleep(150); nosound(); sleep(50);
+            play_sound(659); sleep(150); nosound(); sleep(150); play_sound(784); sleep(300); nosound(); sleep(300);
+            play_sound(392); sleep(300); nosound(); sleep(300);
+        }
+        else if (arg1 == 3) {
+            extern int arp_resolved;
+            if (arp_resolved == 0) { extern void rtl8139_send_arp(void); rtl8139_send_arp(); }
+            else { extern void rtl8139_send_ping(void); rtl8139_send_ping(); }
+        }
+        else if (arg1 == 4) { extern unsigned int current_bg_color; extern volatile int force_redraw; current_bg_color = 0x000000AA; force_redraw = 1; }
+        else if (arg1 == 5) { extern unsigned int current_bg_color; extern volatile int force_redraw; current_bg_color = 0x00AA0000; force_redraw = 1; }
+        else if (arg1 == 6) { // SAAT
+            extern unsigned char bcd_to_bin(unsigned char); extern unsigned char get_rtc_register(int);
+            unsigned char h = bcd_to_bin(get_rtc_register(0x04)); h = (h + 3) % 24;
+            unsigned char m = bcd_to_bin(get_rtc_register(0x02)); unsigned char s = bcd_to_bin(get_rtc_register(0x00));
+            extern void itoa(int, char*); extern void strcpy(char*, const char*); extern void strcat(char*, const char*);
+            char hs[10], ms[10], ss[10]; itoa(h, hs); itoa(m, ms); itoa(s, ss);
+            strcpy(real_buf, "Gercek Donanim Saati: "); strcat(real_buf, hs); strcat(real_buf, ":"); strcat(real_buf, ms); strcat(real_buf, ":"); strcat(real_buf, ss);
+        }
+        else if (arg1 == 7) { // UPTIME
+            extern unsigned int timer_ticks; extern void itoa(int, char*); extern void strcpy(char*, const char*); extern void strcat(char*, const char*);
+            char sec_str[10]; itoa(timer_ticks / 100, sec_str);
+            strcpy(real_buf, "Sistem Calisma Suresi: "); strcat(real_buf, sec_str); strcat(real_buf, " saniye");
+        }
+        else if (arg1 == 8) { // RAM
+            extern unsigned int total_used_memory; extern void itoa(int, char*); extern void strcpy(char*, const char*); extern void strcat(char*, const char*);
+            char mem_str[16]; itoa(total_used_memory, mem_str);
+            strcpy(real_buf, "Kullanilan RAM: "); strcat(real_buf, mem_str); strcat(real_buf, " / 5242880 Bayt (5 MB)");
+        }
+        return 1;
+    }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
     return -1;
 }

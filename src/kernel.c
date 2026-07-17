@@ -386,384 +386,48 @@ void render_gui() {
 // ==========================================
 // 4. MOTOR 2: KOMUT İŞLEYİCİ (COMMAND ENGINE)
 // ==========================================
-void execute_command(char* cmd) {
-    terminal_response[0] = '\0';
-    
-    // YENİ: Komutu ve parametreyi ayır (Örn: "okuyucu.bin SKOR.TXT")
-    char first_word[32];
-    char app_args[128] = "";
-    int f_idx = 0;
-    while (cmd[f_idx] != ' ' && cmd[f_idx] != '\0' && f_idx < 31) {
-        first_word[f_idx] = cmd[f_idx];
-        f_idx++;
-    }
-    first_word[f_idx] = '\0';
-    if (cmd[f_idx] == ' ') {
-        strcpy(app_args, &cmd[f_idx + 1]);
-    }
-    int fw_len = strlen(first_word);
-    if (strcmp(cmd, "") != 0) {
-        strcpy(cmd_history[history_count % MAX_HISTORY], cmd);
-        history_count++;
-        history_index = history_count; 
-    }
+// YENİ: Shell ile Kernel'in Haberleşme Deposu
+char pending_command[256] = "";
+volatile int command_ready = 0;
 
-    if (strcmp(cmd, "info") == 0) {
-        strcpy(terminal_response, "Sistem: ArdaOS V0.3\nMimari: 32-bit x86\nOzel: Gercek Multitasking");
-    } 
-    else if (strcmp(cmd, "temizle") == 0) {
-        terminal_line_count = 0; // Terminali gerçekten temizle!
-        terminal_response[0] = '\0'; 
-    }
-    // ========================================================
-    // YENİ: DONANIMSAL SES (PC SPEAKER) KOMUTLARI
-    // ========================================================
-    else if (strcmp(first_word, "bip") == 0) {
-        beep();
-        strcpy(terminal_response, "Bip sesi calindi!");
-    }
-    else if (strcmp(first_word, "melodi") == 0) {
-        strcpy(terminal_response, "8-bit Nostalji Melodisi caliniyor...");
-        terminal_print(terminal_response); // Metni hemen ekrana bas
-        terminal_response[0] = '\0';       // Tamponu temizle ki iki kez basmasın
-        
-        // Efsanevi Super Mario Giriş Melodisi
-        play_sound(659); sleep(150); nosound(); sleep(50);  // Mi
-        play_sound(659); sleep(150); nosound(); sleep(150); // Mi
-        play_sound(659); sleep(150); nosound(); sleep(150); // Mi
-        play_sound(523); sleep(150); nosound(); sleep(50);  // Do
-        play_sound(659); sleep(150); nosound(); sleep(150); // Mi
-        play_sound(784); sleep(300); nosound(); sleep(300); // Sol (İnce)
-        play_sound(392); sleep(300); nosound(); sleep(300); // Sol (Kalın)
-    }
-    // ========================================================
-    // DİNAMİK UYGULAMA YÜKLEYİCİ (DYNAMIC EXECUTION ENGINE)
-    // ========================================================
-    // Eğer girilen komutun sonu ".bin" veya ".BIN" ile bitiyorsa
-    // ========================================================
-    // DİNAMİK UYGULAMA YÜKLEYİCİ (Parametre Destekli)
-    // ========================================================
-    // İlk kelime ".bin" veya ".BIN" ile bitiyorsa
-    // DİNAMİK UYGULAMA YÜKLEYİCİ (Parametre ve ELF Destekli)
-    // DİNAMİK UYGULAMA YÜKLEYİCİ (Parametre ve ELF Destekli)
-    else if (fw_len > 4 && 
-            (strcmp(first_word + fw_len - 4, ".bin") == 0 || strcmp(first_word + fw_len - 4, ".BIN") == 0 ||
-             strcmp(first_word + fw_len - 4, ".elf") == 0 || strcmp(first_word + fw_len - 4, ".ELF") == 0)) {
-        
-        char raw_name[16];
-        strcpy(raw_name, first_word);
-        raw_name[fw_len - 4] = '\0'; 
-        
-        char target_ext[4];
-        if (first_word[fw_len - 1] == 'n' || first_word[fw_len - 1] == 'N') strcpy(target_ext, "BIN");
-        else strcpy(target_ext, "ELF"); 
-
-        char fat_name[9] = "        "; 
-        for(int i = 0; i < 8 && raw_name[i] != '\0'; i++) {
-            fat_name[i] = raw_name[i];
-            if(fat_name[i] >= 'a' && fat_name[i] <= 'z') fat_name[i] -= 32;
-        }
-        fat_name[8] = '\0';
-
-        // ========================================================
-        // YENİ: Malloc YERİNE Güvenli Statik Buffer Kullanıyoruz!
-        // ========================================================
-        int file_size = ardaos_read_file(fat_name, target_ext, elf_load_buffer);
-        if (file_size > 0) {
-            // Kodlar statik alandan okunup uygulamanın 12. MB'daki yeni izole evrenine kopyalanacak
-            create_task((void (*)())elf_load_buffer, (unsigned int)elf_load_buffer, app_args);
-            
-            strcpy(terminal_response, "[ SISTEM ] ");
-            strcat(terminal_response, raw_name);
-            if (app_args[0] != '\0') strcat(terminal_response, " argumanlarla baslatildi.");
-            else strcat(terminal_response, " baslatildi.");
-        } else {
-            strcpy(terminal_response, "Hata: ");
-            strcat(terminal_response, first_word);
-            strcat(terminal_response, " diskte bulunamadi.");
-        }
-    }
-    else if (strcmp(cmd, "renk mavi") == 0) {
-        current_bg_color = 0x000000AA;
-        strcpy(terminal_response, "Masaustu rengi mavi olarak degistirildi.");
-    } 
-    else if (strcmp(cmd, "renk kirmizi") == 0) {
-        current_bg_color = 0x00AA0000;
-        strcpy(terminal_response, "Masaustu rengi kirmizi olarak degistirildi.");
-    } 
-    else if (strcmp(cmd, "help") == 0) {
-        strcpy(terminal_response, 
-            "--- ARDAOS KOMUT LISTESI ---\n"
-            "[ SISTEM ] info, help, temizle, saat, uptime, ram, memorytest\n"
-            "[ GOREV  ] ps (Gorevleri listele), kill <PID>, <uygulama>.bin [arg]\n"
-            "[ DISK   ] ls (veya dir), yaz <DOSYA.UZT> <metin>, rm <DOSYA.UZT>, mkdir <AD>\n"
-            "[ GRAFIK ] renk <mavi/kirmizi>, ciz dikdortgen <x y w h rnk>, ciz temizle\n"
-            "[ DIGER  ] hesapla <a+b>, yanki <mesaj>, bip, melodi"
-        );
-    }
-    // ========================================================
-    // YENİ: GÖREV YÖNETİCİSİ KOMUTLARI
-    // ========================================================
-    else if (strcmp(cmd, "ps") == 0) {
-        // task.c'deki fonksiyonu çağırıp sonucu terminale yazdır
-        get_process_list(terminal_response);
-    }
-    else if (strncmp(cmd, "kill ", 5) == 0) {
-        // "kill 3" yazıldığında 3 rakamını ayrıştır
-        int i = 5;
-        while(cmd[i] == ' ') i++;
-        int target_pid = atoi(&cmd[i]);
-        
-        // PID 0 (Kernel) ve PID 1 (Arka Plan Sayacı) sistemin kalbidir, dokunulamaz!
-        if (target_pid == 0 || target_pid == 1) {
-            strcpy(terminal_response, "[ HATA ] KERNEL veya SYSTEM gorevleri oldurulemez!");
-        } else {
-            // Ana döngüdeki "Cellat Motoru"na hedefi bildir!
-            task_to_kill = target_pid; 
-            
-            strcpy(terminal_response, "[ SISTEM ] Kill sinyali gonderildi: PID ");
-            char pid_str[10];
-            itoa(target_pid, pid_str);
-            strcat(terminal_response, pid_str);
-        }
-    }
-    else if (strcmp(cmd, "ls") == 0 || strcmp(cmd, "dir") == 0) {
-        ardaos_list_files(terminal_response);
-    }
-    else if (strcmp(cmd, "memorytest") == 0) {
-        void* test_ptr = malloc(1024); 
-        if (test_ptr != 0) {
-            free(test_ptr); 
-            strcpy(terminal_response, "[ BASARILI ] 1 KB Heap bellegi iade edildi.");
-        } else {
-            strcpy(terminal_response, "[ HATA ] Yetersiz Heap bellegi.");
-        }
-    }
-    else if (strcmp(cmd, "ram") == 0) {
-        char mem_str[16];
-        itoa(total_used_memory, mem_str);
-        strcpy(terminal_response, "[ SISTEM RAM ] Kullanilan: ");
-        strcat(terminal_response, mem_str);
-        strcat(terminal_response, " Bayt / 5242880 Bayt (5 MB)");
-    }
-    else if (strcmp(cmd, "uptime") == 0) {
-        char sec_str[10];
-        itoa(timer_ticks / 100, sec_str);
-        strcpy(terminal_response, "Sistem Gercek Calisma Suresi: ");
-        strcat(terminal_response, sec_str);
-        strcat(terminal_response, " saniye");
-    }
-    // ========================================================
-    // YENİ: DOSYA YAZMA (TOUCH / ECHO >)
-    // ========================================================
-    else if (strcmp(first_word, "yaz") == 0) {
-        if (app_args[0] == '\0') {
-            strcpy(terminal_response, "Hata: Kullanim -> yaz DOSYA.TXT Icerik metni...");
-        } else {
-            char fat_name[9] = "        ";
-            char fat_ext[4] = "   ";
-            char file_content[512] = {0}; // Maksimum 1 sektörlük (512 bayt) metin
-
-            int i = 0, k = 0;
-            
-            // 1. Dosya adını 8 karakter FAT formatına çevir
-            while (app_args[i] != '.' && app_args[i] != ' ' && app_args[i] != '\0' && k < 8) {
-                char c = app_args[i++];
-                if (c >= 'a' && c <= 'z') c -= 32;
-                fat_name[k++] = c;
-            }
-            
-            // 2. Noktayı atla ve uzantıyı 3 karakter FAT formatına çevir
-            if (app_args[i] == '.') {
-                i++; k = 0;
-                while (app_args[i] != ' ' && app_args[i] != '\0' && k < 3) {
-                    char c = app_args[i++];
-                    if (c >= 'a' && c <= 'z') c -= 32;
-                    fat_ext[k++] = c;
-                }
-            }
-
-            // 3. Dosya adından sonraki boşlukları atla (İçeriğe geçiş)
-            while (app_args[i] == ' ') i++;
-
-            // 4. Geri kalan tüm metni dosya içeriği olarak kopyala
-            int c_idx = 0;
-            while (app_args[i] != '\0' && c_idx < 511) {
-                file_content[c_idx++] = app_args[i++];
-            }
-            file_content[c_idx] = '\0'; // Metnin sonunu belirle
-
-            // 5. İçerik boş mu kontrol et, değilse diske fırlat!
-            if (c_idx == 0) {
-                 strcpy(terminal_response, "Hata: Dosyaya yazilacak icerik bos olamaz!");
-            } else {
-                 if (ardaos_write_file(fat_name, fat_ext, c_idx, (unsigned char*)file_content) == 0) {
-                     strcpy(terminal_response, "[ BASARILI ] Dosya diske yazildi.");
-                 } else {
-                     strcpy(terminal_response, "[ HATA ] Dosya diske yazilamadi (Disk dolu olabilir).");
-                 }
-            }
-        }
-    }
-    // ========================================================
-    // YENİ: DOSYA SİLME (RM) VE KLASÖR AÇMA (MKDIR)
-    // ========================================================
-    else if (strcmp(first_word, "rm") == 0) {
-        if (app_args[0] == '\0') {
-            strcpy(terminal_response, "Hata: Silinecek dosyayi belirtin (Orn: rm SKOR.TXT)");
-        } else {
-            char fat_name[9] = "        "; 
-            char fat_ext[4] = "   ";
-            int i = 0, k = 0;
-            // Dosya adını 8 karakter FAT formatına çevir
-            while (app_args[i] != '.' && app_args[i] != '\0' && k < 8) {
-                char c = app_args[i++];
-                if (c >= 'a' && c <= 'z') c -= 32;
-                fat_name[k++] = c;
-            }
-            if (app_args[i] == '.') {
-                i++; k = 0;
-                // Uzantıyı 3 karakter FAT formatına çevir
-                while (app_args[i] != '\0' && k < 3) {
-                    char c = app_args[i++];
-                    if (c >= 'a' && c <= 'z') c -= 32;
-                    fat_ext[k++] = c;
-                }
-            }
-            fat_name[8] = '\0'; fat_ext[3] = '\0';
-            
-            if (ardaos_delete_file(fat_name, fat_ext) == 0) {
-                strcpy(terminal_response, "[ BASARILI ] Dosya diskten kalici olarak silindi.");
-            } else {
-                strcpy(terminal_response, "[ HATA ] Dosya diskte bulunamadi!");
-            }
-        }
-    }
-    else if (strcmp(first_word, "mkdir") == 0) {
-        if (app_args[0] == '\0') {
-            strcpy(terminal_response, "Hata: Klasor adini belirtin (Orn: mkdir OYUNLAR)");
-        } else {
-            char fat_name[9] = "        ";
-            int i = 0;
-            // Klasör adını 8 karakter FAT formatına çevir
-            while(app_args[i] != ' ' && app_args[i] != '\0' && i < 8) {
-                char c = app_args[i];
-                if (c >= 'a' && c <= 'z') c -= 32;
-                fat_name[i] = c;
-                i++;
-            }
-            fat_name[8] = '\0';
-            
-            if (ardaos_create_dir(fat_name) == 0) {
-                strcpy(terminal_response, "[ BASARILI ] Klasor diskte olusturuldu.");
-            } else {
-                strcpy(terminal_response, "[ HATA ] Klasor olusturulamadi (Disk dolu).");
-            }
-        }
-    }
-    else if (strcmp(cmd, "saat") == 0) {
-        unsigned char h = bcd_to_bin(get_rtc_register(0x04));
-        unsigned char m = bcd_to_bin(get_rtc_register(0x02));
-        unsigned char s = bcd_to_bin(get_rtc_register(0x00));
-        h = (h + 3) % 24;
-        char hs[10], ms[10], ss[10];
-        itoa(h, hs); itoa(m, ms); itoa(s, ss);
-        strcpy(terminal_response, "Gercek Donanim Saati: ");
-        strcat(terminal_response, hs); strcat(terminal_response, ":");
-        strcat(terminal_response, ms); strcat(terminal_response, ":");
-        strcat(terminal_response, ss);
-    }
-    else if (strncmp(cmd, "yanki ", 6) == 0) { 
-        strcpy(terminal_response, "Sen dedin ki: ");
-        strcat(terminal_response, cmd + 6); 
-    }
-    else if (strcmp(first_word, "ping") == 0) {
-        extern int arp_resolved;
-        
-        // Eğer MAC adresini henüz bilmiyorsak (arp_resolved == 0)
-        if (arp_resolved == 0) {
-            extern void rtl8139_send_arp(void);
-            rtl8139_send_arp();
-            strcpy(terminal_response, "[ SISTEM ] MAC adresi bilinmiyor. ARP Istegi atildi.");
-        } 
-        // Eğer MAC adresini biliyorsak, GERÇEK İNTERNET PING'ini fırlat!
-        else {
-            extern void rtl8139_send_ping(void);
-            rtl8139_send_ping();
-            strcpy(terminal_response, "[ SISTEM ] GERCEK ICMP PING PAKETI FIRLATILDI!");
-        }
-    }
-    else if (strncmp(cmd, "hesapla ", 8) == 0) {
-        int i = 8; 
-        while(cmd[i] == ' ') i++;
-        int num1 = atoi(&cmd[i]);
-        while((cmd[i] >= '0' && cmd[i] <= '9') || cmd[i] == '-') i++;
-        while(cmd[i] == ' ') i++; 
-        char op = cmd[i];
+// YENİ: Sadece Uygulama Yüklemeyi Bilen Saf Çekirdek Fonksiyonu
+int api_exec_app(const char* name, const char* args) {
+    char raw_name[16];
+    int i = 0;
+    while(name[i] != '\0' && name[i] != '.' && i < 15) {
+        raw_name[i] = name[i];
         i++;
-        while(cmd[i] == ' ') i++;
-        int num2 = atoi(&cmd[i]);
+    }
+    raw_name[i] = '\0';
+    
+    char ext[4] = "ELF";
+    int len = strlen(name);
+    if (len > 4 && (name[len-1] == 'n' || name[len-1] == 'N')) strcpy(ext, "BIN");
 
-        int result = 0; int valid = 1;
-        if (op == '+') result = num1 + num2;
-        else if (op == '-') result = num1 - num2;
-        else if (op == '*') result = num1 * num2;
-        else if (op == '/') {
-            if (num2 == 0) { valid = 0; strcpy(terminal_response, "Hata: Sifira bolme yapilamaz!"); }
-            else result = num1 / num2;
-        } else {
-            valid = 0;
-            strcpy(terminal_response, "Gecersiz islem! Ornek: hesapla 25 + 14");
-        }
+    char fat_name[9] = "        "; 
+    for(int j = 0; j < 8 && raw_name[j] != '\0'; j++) {
+        fat_name[j] = raw_name[j];
+        if(fat_name[j] >= 'a' && fat_name[j] <= 'z') fat_name[j] -= 32;
+    }
+    fat_name[8] = '\0';
 
-        if (valid) {
-            char res_str[32];
-            itoa(result, res_str);
-            strcpy(terminal_response, "Islem Sonucu: ");
-            strcat(terminal_response, res_str);
-        }
+    extern unsigned char elf_load_buffer[];
+    int file_size = ardaos_read_file(fat_name, ext, elf_load_buffer);
+    if (file_size > 0) {
+        // Diskten okunan programı yeni bir Görev (Task) olarak başlat
+        int pid = create_task((void (*)())elf_load_buffer, (unsigned int)elf_load_buffer, (char*)args);
+        return pid;
     }
-    else if (strncmp(cmd, "ciz ", 4) == 0) {
-        char* args = cmd + 4; 
-        if (strncmp(args, "temizle", 7) == 0) {
-            desktop_shape_count = 0; 
-            strcpy(terminal_response, "Masaustu tuvali temizlendi!");
-        }
-        else if (strncmp(args, "dikdortgen ", 11) == 0) {
-            if (desktop_shape_count < MAX_DESKTOP_SHAPES) {
-                int i = 11;
-                while(args[i] == ' ') i++; int x = atoi(&args[i]);
-                while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
-                while(args[i] == ' ') i++; int y = atoi(&args[i]);
-                while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
-                while(args[i] == ' ') i++; int w = atoi(&args[i]);
-                while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
-                while(args[i] == ' ') i++; int h = atoi(&args[i]);
-                while((args[i] >= '0' && args[i] <= '9') || args[i] == '-') i++;
-                while(args[i] == ' ') i++;
-                
-                unsigned int c = 0x00FFFFFF;
-                if (strncmp(&args[i], "kirmizi", 7) == 0) c = 0x00FF2D55;
-                else if (strncmp(&args[i], "yesil", 5) == 0) c = 0x0034C759;
-                else if (strncmp(&args[i], "mavi", 4) == 0) c = 0x000078D7;
-                else if (strncmp(&args[i], "sari", 4) == 0) c = 0x00FFCC00;
-
-                desktop_shape_x[desktop_shape_count] = x; desktop_shape_y[desktop_shape_count] = y;
-                desktop_shape_w[desktop_shape_count] = w; desktop_shape_h[desktop_shape_count] = h;
-                desktop_shape_color[desktop_shape_count] = c; desktop_shape_count++;
-                strcpy(terminal_response, "Masaustu Sekli Eklendi!");
-            }
-        } 
-    }
-    else if (strcmp(cmd, "") == 0) { } 
-    else {
-        strcpy(terminal_response, "Hata: Bilinmeyen komut! 'help' yazarak komutlari gorebilirsiniz.");
-    }
-    if (terminal_response[0] != '\0') {
-        terminal_print(terminal_response);
-    }
+    return -1;
 }
 
+// Shell'in ekranı temizleyebilmesi için Kernel köprüsü
+void api_clear_terminal() {
+    extern int terminal_line_count;
+    extern volatile int force_redraw;
+    terminal_line_count = 0;
+    force_redraw = 1;
+}
 // ==========================================
 // 5. MOTOR 3: GİRDİ YÖNETİCİSİ (INPUT ENGINE)
 // ==========================================
@@ -782,13 +446,15 @@ void process_keyboard_events() {
             last_game_key = 0; 
             
             if (kbd_char == '\n') { 
-                terminal_print(user_input); // YENİ: Yazdığımız komutu ekranda kaydır
+                terminal_print(user_input); 
                 
-                char* cmd = &user_input[6]; 
-                execute_command(cmd);
+                // YENİ: Komutu işletmek yerine Shell.elf'e (Ring 3) devret!
+                strcpy(pending_command, &user_input[6]);
+                command_ready = 1; 
+                
                 strcpy(user_input, "Arda> ");
                 input_idx = 6;
-            } 
+            }
             else if (kbd_char == 17) { // GEÇMİŞ KOMUT: YUKARI OK 
                 if (history_count > 0 && history_index > 0) {
                     history_index--;
@@ -934,7 +600,8 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     
     // Terminali başlat
     terminal_print("ArdaOS V0.5 Multitasking'e Hos Geldiniz!");
-
+    // İŞLETİM SİSTEMİ AYAĞA KALKTIĞINDA İLK OLARAK SHELL'İ BAŞLAT!
+    api_exec_app("shell.elf", "");
     // ==========================================
     // MULTITASKING ANA DÖNGÜSÜ
     // ==========================================

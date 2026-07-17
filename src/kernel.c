@@ -297,6 +297,20 @@ void draw_taskbar() {
     // 1. Zemin: Görev çubuğunun arka planı
     draw_rect(0, 728, 1024, 40, 0x00111A);
     
+    // --- YENİ: SOL BÖLGE (Hızlı Kontrol Butonları) ---
+    // 1. Buton: Sol Ok (<) | X: 10, Y: 732
+    draw_rect(10, 732, 35, 32, 0x00333333);
+    draw_string(22, 742, "<", 0x00FFFFFF, 0x00333333);
+
+    // 2. Buton: Seçenekler Menüsü (=) | X: 55, Y: 732
+    draw_rect(55, 732, 40, 32, 0x00333333);
+    draw_string(71, 742, "=", 0x00FFFFFF, 0x00333333); // İstersen "O" veya "M" de yapabilirsin
+
+    // 3. Buton: Sağ Ok (>) | X: 105, Y: 732
+    draw_rect(105, 732, 35, 32, 0x00333333);
+    draw_string(117, 742, ">", 0x00FFFFFF, 0x00333333);
+    // ------------------------------------------------
+    
     // 2. SAĞ BÖLGE: Canlı Saat
     unsigned char h = bcd_to_bin(get_rtc_register(0x04));
     h = (h + 3) % 24; // GMT+3 Türkiye Saati
@@ -549,16 +563,64 @@ void process_mouse_events() {
         if (mouse_left_button) {
             if (!any_window_dragging) {
                 if (mouse_y >= 728) {
-                    if (mouse_x >= 150 && mouse_x < 930) { // Butonların olduğu bölge
+                    // SOL BÖLGE - Buton 1: Önceki Uygulama (<)
+                    if (mouse_x >= 10 && mouse_x <= 45) {
+                        int prev_idx = focused_window;
+                        for (int i = 1; i < MAX_WINDOWS; i++) {
+                            // Modulo (kalan bulma) ile dizinin başına dönebilen geri sayım
+                            int check = (focused_window - i + MAX_WINDOWS) % MAX_WINDOWS;
+                            if (windows[check].is_open) {
+                                prev_idx = check;
+                                break;
+                            }
+                        }
+                        if (prev_idx != focused_window) {
+                            focused_window = prev_idx;
+                            force_redraw = 1;
+                        }
+                    }
+                    
+                    // SOL BÖLGE - Buton 2: Seçenekler (=)
+                    else if (mouse_x >= 55 && mouse_x <= 95) {
+                        // Şimdilik test amaçlı: Aktif pencereyi anında KAPAT!
+                        if (focused_window >= 0 && windows[focused_window].is_open) {
+                            windows[focused_window].is_open = 0;
+                            force_redraw = 1;
+                            
+                            // Ekran boş kalmasın, açık başka bir pencere varsa ona odaklan
+                            for (int i = 0; i < MAX_WINDOWS; i++) {
+                                if (windows[i].is_open) { focused_window = i; break; }
+                            }
+                        }
+                    }
+                    
+                    // SOL BÖLGE - Buton 3: Sonraki Uygulama (>)
+                    else if (mouse_x >= 105 && mouse_x <= 140) {
+                        int next_idx = focused_window;
+                        for (int i = 1; i < MAX_WINDOWS; i++) {
+                            // Dizinin sonuna gelince başa dönen ileri sayım
+                            int check = (focused_window + i) % MAX_WINDOWS;
+                            if (windows[check].is_open) {
+                                next_idx = check;
+                                break;
+                            }
+                        }
+                        if (next_idx != focused_window) {
+                            focused_window = next_idx;
+                            force_redraw = 1;
+                        }
+                    }
+                    
+                    // ORTA BÖLGE - Pencerelerin Kendi Butonları
+                    else if (mouse_x >= 150 && mouse_x < 930) {
                         int btn_index = (mouse_x - 150) / 130;
                         int current_idx = 0;
-                        
                         for (int i = 0; i < MAX_WINDOWS; i++) {
                             if (windows[i].is_open) {
                                 if (current_idx == btn_index) {
                                     if (focused_window != i) {
                                         focused_window = i; 
-                                        force_redraw = 1; // Z-Order değişti, ekranı tazele!
+                                        force_redraw = 1; 
                                     }
                                     break;
                                 }
@@ -566,9 +628,9 @@ void process_mouse_events() {
                             }
                         }
                     }
-                    // Görev çubuğuna tıklandıysa masaüstü pencerelerini algılamayı es geç
+                    
                     last_mouse_x = mouse_x; last_mouse_y = mouse_y;
-                    return; 
+                    return;
                 } 
                 int clicked_window = -1;
                 if (windows[focused_window].is_open &&

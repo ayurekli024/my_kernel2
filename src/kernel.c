@@ -443,14 +443,19 @@ void execute_command(char* cmd) {
     // DİNAMİK UYGULAMA YÜKLEYİCİ (Parametre Destekli)
     // ========================================================
     // İlk kelime ".bin" veya ".BIN" ile bitiyorsa
+    // DİNAMİK UYGULAMA YÜKLEYİCİ (Parametre ve ELF Destekli)
     else if (fw_len > 4 && 
-            (strcmp(first_word + fw_len - 4, ".bin") == 0 || 
-             strcmp(first_word + fw_len - 4, ".BIN") == 0)) {
+            (strcmp(first_word + fw_len - 4, ".bin") == 0 || strcmp(first_word + fw_len - 4, ".BIN") == 0 ||
+             strcmp(first_word + fw_len - 4, ".elf") == 0 || strcmp(first_word + fw_len - 4, ".ELF") == 0)) {
         
         char raw_name[16];
         strcpy(raw_name, first_word);
-        raw_name[fw_len - 4] = '\0'; // Uzantıyı kes (Örn: "OKUYUCU")
+        raw_name[fw_len - 4] = '\0'; 
         
+        char target_ext[4];
+        if (first_word[fw_len - 1] == 'n' || first_word[fw_len - 1] == 'N') strcpy(target_ext, "BIN");
+        else strcpy(target_ext, "ELF"); // FAT16 için doğru uzantıyı belirle
+
         char fat_name[9] = "        "; 
         for(int i = 0; i < 8 && raw_name[i] != '\0'; i++) {
             fat_name[i] = raw_name[i];
@@ -458,14 +463,13 @@ void execute_command(char* cmd) {
         }
         fat_name[8] = '\0';
 
-        unsigned char* app_memory = (unsigned char*)malloc(4096); 
+        // ELF dosyaları blok hizalamaları yüzünden 4 KB'ı aşabilir, limiti yükselttik
+        unsigned char* app_memory = (unsigned char*)malloc(16384); 
         if (app_memory != 0) {
-            int file_size = ardaos_read_file(fat_name, "BIN", app_memory);
+            int file_size = ardaos_read_file(fat_name, target_ext, app_memory);
             if (file_size > 0) {
-                void (*app_entry)() = (void (*)())app_memory;
-                
-                // İŞTE SİHİR BURADA: Ayrıştırılan parametreyi Stack'e yolla!
-                create_task(app_entry, (unsigned int)app_memory, app_args);
+                // create_task artık arka planda CR3'ü büküp kendi ELF kontrolünü yapacak!
+                create_task((void (*)())app_memory, (unsigned int)app_memory, app_args);
                 
                 strcpy(terminal_response, "[ SISTEM ] ");
                 strcat(terminal_response, raw_name);

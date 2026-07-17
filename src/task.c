@@ -5,6 +5,8 @@ task_t* current_task;
 task_t* ready_queue;
 int next_pid = 1;
 extern void set_kernel_stack(unsigned int stack);
+// ELF motorunun varlığından derleyiciye önceden haber veriyoruz
+unsigned int load_elf_segments(unsigned char* elf_data);
 void update_tss_esp0() {
     if (current_task != 0) {
         set_kernel_stack(current_task->stack_base + 4096);
@@ -65,24 +67,31 @@ int create_task(void (*func)(void), unsigned int app_base, char* args) {
     extern unsigned int* create_task_page_dir(void);
     extern unsigned int page_directory[1024];
     if (is_user) {
-        // ==========================================
-        // YENİ: UYGULAMAYA ÖZEL KLONLANMIŞ HARİTA (CR3)
-        // ==========================================
         new_task->cr3 = (unsigned int)create_task_page_dir();
         
-        // 1. Kullanıcı yığınını (User Stack) ayarla (3 KB noktası)
+        // --- ELF YÜKLEYİCİ İÇİN DONANIMSAL CR3 GEÇİŞİ ---
+        unsigned int kernel_cr3;
+        __asm__ __volatile__("mov %%cr3, %0" : "=r"(kernel_cr3)); // Orijinal haritayı kaydet
+        __asm__ __volatile__("mov %0, %%cr3" : : "r"(new_task->cr3)); // Uygulamanın boyutuna geç
+
+        unsigned int actual_entry_point = (unsigned int)func;
+        unsigned int elf_entry = load_elf_segments((unsigned char*)app_base);
+        if (elf_entry != 0) {
+            actual_entry_point = elf_entry; // Dosya ELF ise başlangıç adresi başlık içinden gelir!
+        }
+
+        __asm__ __volatile__("mov %0, %%cr3" : : "r"(kernel_cr3)); // Çekirdek haritasına güvenle geri dön!
+        // ------------------------------------------------
+        
         unsigned int* user_stack_top = (unsigned int*)(new_task->stack_base + 3072);
+        *(--user_stack_top) = (unsigned int)target_args;
+        *(--user_stack_top) = 0x00000000;
 
-        // 2. DÜZELTME: Argümanları Kullanıcı Yığınına İT! (Kernel yığınına değil)
-        *(--user_stack_top) = (unsigned int)target_args; // 1. Parametre (args)
-        *(--user_stack_top) = 0x00000000;                // Sahte Dönüş Adresi
-
-        // --- RING 3 (KULLANICI MODU) SAHTE IRET ÇERÇEVESİ ---
-        *(--stack_top) = 0x23; // User SS
-        *(--stack_top) = (unsigned int)user_stack_top; // Parametrelerin olduğu User ESP'yi ver!
-        *(--stack_top) = 0x202; // EFLAGS
-        *(--stack_top) = 0x1B; // User CS
-        *(--stack_top) = (unsigned int)func; // EIP
+        *(--stack_top) = 0x23; 
+        *(--stack_top) = (unsigned int)user_stack_top; 
+        *(--stack_top) = 0x202; 
+        *(--stack_top) = 0x1B; 
+        *(--stack_top) = actual_entry_point; // DÜZELTME: Doğru tespit edilen EIP yazılıyor
     } else {
         // ==========================================
         // YENİ: KERNEL GÖREVLERİ ANA HARİTAYI KULLANIR (CR3)
@@ -203,4 +212,33 @@ void get_process_list(char* buffer) {
         
         curr = curr->next;
     } while (curr != ready_queue);
+}
+unsigned int load_elf_segments(unsigned char* elf_data) {
+    elf32_ehdr_t* header = (elf32_ehdr_t*)elf_data;
+    
+    // Sihirli ELF İmzası Kontrolü (0x7F 'E' 'L' 'F')
+    if (header->e_ident[0] != 0x7F || header->e_ident[1] != 'E' || 
+        header->e_ident[2] != 'L' || header->e_ident[3] != 'F') {
+        return 0; // Dosya ELF değilse 0 döndür
+    }
+    
+    elf32_phdr_t* phdr = (elf32_phdr_t*)(elf_data + header->e_phoff);
+    
+    for (int i = 0; i < header->e_phnum; i++) {
+        if (phdr[i].p_type == 1) { // 1 = PT_LOAD (Yüklenebilir Segment)
+            unsigned char* dest = (unsigned char*)phdr[i].p_vaddr;
+            unsigned char* src = elf_data + phdr[i].p_offset;
+            
+            // Diskteki salt veriyi RAM'e (Örn: 0x400000) kopyala
+            for (unsigned int j = 0; j < phdr[i].p_filesz; j++) {
+                dest[j] = src[j];
+            }
+            
+            // Kalan .bss kısmını (Sıfırla başlatılan değişkenler) sıfırla
+            for (unsigned int j = phdr[i].p_filesz; j < phdr[i].p_memsz; j++) {
+                dest[j] = 0;
+            }
+        }
+    }
+    return header->e_entry; // Bağlayıcı scriptinde ayarlanan giriş noktasını dön
 }

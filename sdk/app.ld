@@ -1,22 +1,20 @@
-/* İŞTE UNUTTUĞUM O EFSANE KORUMA ZIRHI! GCC'yi saf makine kodu üretmeye zorlar! */
-OUTPUT_FORMAT("binary")
+OUTPUT_FORMAT("elf32-i386")
+ENTRY(main) /* ELF başlığına eklenecek ilk giriş noktası */
 
 SECTIONS
 {
-    /* Uygulamanın RAM'deki adresini 0 varsayarak derle */
-    . = 0x00000000;
+    . = 0x400000; /* Uygulamaların yeni ortak sanal evreni! */
     
-    .text : ALIGN(4) {
-        *(.text.entry) /* Entry point ZORUNLU olarak 0. baytta kalır */
+    .text : ALIGN(4096) {
         *(.text*)
-        *(.rodata*)    /* C dilindeki sabit metinler ("ZAFER!" vb.) koda gömülür */
+        *(.rodata*)
     }
     
-    .data : ALIGN(4) {
+    .data : ALIGN(4096) {
         *(.data*)
     }
     
-    .bss : ALIGN(4) {
+    .bss : ALIGN(4096) {
         *(.bss*)
         *(COMMON)
     }

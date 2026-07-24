@@ -398,6 +398,14 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         }
         return 1;
     }
+    // API No 30: sys_set_window_text (Pencere İçi Metin Güncelleme)
+    else if (sys_num == 30) {
+        unsigned int base = current_task->app_base;
+        const char* real_text = (unsigned int)arg1 < 0x100000 ? (const char*)(base + arg1) : (const char*)arg1;
+        extern void api_set_window_text(const char*);
+        api_set_window_text(real_text);
+        return 1;
+    }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
     return -1;
 }

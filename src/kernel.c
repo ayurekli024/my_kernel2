@@ -46,6 +46,7 @@ typedef struct {
     // --- YENİ EKLENEN DURUMLAR ---
     int is_minimized; // 1 = Görev çubuğunda gizli, 0 = Ekranda
     int prev_x, prev_y, prev_w, prev_h; // Tam ekran yapılınca geri dönülecek boyutlar
+    char text_content[1024];
 } window_t;
 
 window_t windows[MAX_WINDOWS];
@@ -111,6 +112,7 @@ int api_create_window(const char* title, int w, int h) {
             windows[i].w = w; windows[i].h = h;
             windows[i].is_open = 1; windows[i].is_dragging = 0;
             windows[i].is_minimized = 0;
+            windows[i].text_content[0] = '\0'; // YENİ: Başlangıçta metin boş
             
             int j = 0;
             while (real_title[j] != '\0' && j < 31) {
@@ -188,8 +190,14 @@ int api_write_file(const char* name, const char* ext, unsigned char* buffer) {
     const char* real_ext = (unsigned int)ext < 0x100000 ? (const char*)(base + (unsigned int)ext) : ext;
     unsigned char* real_buffer = (unsigned int)buffer < 0x100000 ? (unsigned char*)(base + (unsigned int)buffer) : buffer;
     
-    // KESİN ZIRH: Uygulamadan boyut bekleme, donanım standardı olan 512'yi (1 Sektör) zorla!
-    return ardaos_write_file(real_name, real_ext, 512, real_buffer);
+    // YENİ: Sadece yazılan gerçek uzunluğu hesapla!
+    int actual_size = 0;
+    while(real_buffer[actual_size] != '\0' && actual_size < 10240) {
+        actual_size++;
+    }
+    actual_size++; // \0'ı da kaydet
+    
+    return ardaos_write_file(real_name, real_ext, actual_size, real_buffer);
 }
 
 // MULTITASKING API: Harici uygulamanın güvenli şekilde dosya okuması
@@ -199,6 +207,21 @@ int api_read_file(const char* name, const char* ext, unsigned char* buffer) {
     const char* real_ext = (unsigned int)ext < 0x100000 ? (const char*)(base + (unsigned int)ext) : ext;
     unsigned char* real_buffer = (unsigned int)buffer < 0x100000 ? (unsigned char*)(base + (unsigned int)buffer) : buffer;
     return ardaos_read_file(real_name, real_ext, real_buffer);
+}
+// YENİ: Harici uygulamaların pencerelerine metin yazdırması için
+void api_set_window_text(const char* text) {
+    for (int i = 2; i < MAX_WINDOWS; i++) {
+        if (windows[i].is_open && windows[i].owner_task_id == current_task->id) {
+            int k = 0;
+            while (text[k] != '\0' && k < 1023) {
+                windows[i].text_content[k] = text[k];
+                k++;
+            }
+            windows[i].text_content[k] = '\0';
+            force_redraw = 1;
+            return;
+        }
+    }
 }
 // ========================================================
 // VFS KÖPRÜSÜ: SANAL DONANIMLARI OKUMA (Hardware Abstraction)
@@ -452,13 +475,36 @@ void render_gui() {
             }
         }
         else if (w_idx >= 2) {
-            draw_rect(windows[w_idx].x + 2, windows[w_idx].y + 32, windows[w_idx].w - 4, windows[w_idx].h - 34, 0x00000000);
+            draw_rect(windows[w_idx].x + 2, windows[w_idx].y + 32, windows[w_idx].w - 4, windows[w_idx].h - 34, 0x00F0F0F0);
+            
+            // 1. Şekilleri Çiz (Varsa)
             for (int s = 0; s < windows[w_idx].shape_count; s++) {
-                draw_rect(windows[w_idx].x + windows[w_idx].shape_x[s], 
-                          windows[w_idx].y + 32 + windows[w_idx].shape_y[s], 
-                          windows[w_idx].shape_w[s], 
-                          windows[w_idx].shape_h[s], 
-                          windows[w_idx].shape_color[s]);
+                draw_rect(windows[w_idx].x + windows[w_idx].shape_x[s], windows[w_idx].y + 32 + windows[w_idx].shape_y[s], 
+                          windows[w_idx].shape_w[s], windows[w_idx].shape_h[s], windows[w_idx].shape_color[s]);
+            }
+            
+            // 2. Metin İçeriğini Çiz (Satır satır kaydırarak)
+            int txt_x = windows[w_idx].x + 10;
+            int txt_y = windows[w_idx].y + 40;
+            char line_buf[80];
+            int l_idx = 0;
+            
+            for (int c = 0; windows[w_idx].text_content[c] != '\0'; c++) {
+                if (windows[w_idx].text_content[c] == '\n' || l_idx >= ((windows[w_idx].w - 20) / 8)) {
+                    line_buf[l_idx] = '\0';
+                    draw_string(txt_x, txt_y, line_buf, 0x00000000, 0x00F0F0F0); // Gri zemine siyah yazı
+                    txt_y += 16;
+                    l_idx = 0;
+                    if (windows[w_idx].text_content[c] == '\n') continue;
+                }
+                line_buf[l_idx++] = windows[w_idx].text_content[c];
+            }
+            line_buf[l_idx] = '\0';
+            draw_string(txt_x, txt_y, line_buf, 0x00000000, 0x00F0F0F0);
+            
+            // 3. Yanıp Sönen Profesyonel İmleç (Cursor)
+            if (w_idx == focused_window && (timer_ticks % 100) < 50) { 
+                draw_rect(txt_x + (l_idx * 8), txt_y, 8, 16, 0x00000000); // Siyah imleç bloku
             }
         }
         reset_clipping_rect();
@@ -502,8 +548,14 @@ int api_exec_app(const char* name, const char* args) {
     extern unsigned char elf_load_buffer[];
     int file_size = ardaos_read_file(fat_name, ext, elf_load_buffer);
     if (file_size > 0) {
-        // Diskten okunan programı yeni bir Görev (Task) olarak başlat
-        int pid = create_task((void (*)())elf_load_buffer, (unsigned int)elf_load_buffer, (char*)args);
+        // YENİ: Her uygulamaya RAM'de ÖZEL BİR EV tahsis et!
+        extern void* malloc(unsigned int);
+        unsigned char* app_memory = (unsigned char*)malloc(file_size + 4096); 
+        
+        for (int k = 0; k < file_size; k++) app_memory[k] = elf_load_buffer[k];
+        for (int k = file_size; k < file_size + 4096; k++) app_memory[k] = 0; // RAM'i temizle
+        
+        int pid = create_task((void (*)())app_memory, (unsigned int)app_memory, (char*)args);
         return pid;
     }
     return -1;

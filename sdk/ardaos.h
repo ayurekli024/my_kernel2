@@ -95,4 +95,7 @@ static inline void sys_list_files(char* buffer) {
 static inline void sys_system_action(int action_id, char* buffer) {
     __asm__ __volatile__ ("int $0x80" : : "a"(29), "b"(action_id), "c"((unsigned int)buffer));
 }
+static inline void sys_set_window_text(const char* text) {
+    __asm__ __volatile__ ("int $0x80" : : "a"(30), "b"((unsigned int)text));
+}
 #endif

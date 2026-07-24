@@ -150,35 +150,59 @@ void yield() {
     __asm__ __volatile__ ("int $129"); // Saati bozmayan yeni görev değiştiricimiz!
 }
 
+// ZIRH 1: Silinen görev sıranın başındaysa (ready_queue) sistemi boşa düşürme!
 void kill_task_by_id(int task_id) {
     task_t* curr = ready_queue;
     if (curr == 0) return;
-    
     do {
         if (curr->next->id == task_id) { 
             task_t* target = curr->next;
-            curr->next = target->next; 
             
-            // =========================================================
-            // SEÇENEK 1: KUSURSUZ RAM İADESİ (TRUE DEALLOCATION)
-            // =========================================================
-            // 1. Görevin 4 KB'lık Yığın (Stack) belleğini iade et
-            if (target->stack_base != 0) {
-                free((void*)target->stack_base);
+            // YENİ: Sistemin ana işaretçisi siliniyorsa, kaydır!
+            if (ready_queue == target) {
+                ready_queue = target->next;
             }
             
-            // 2. Harici uygulama ise (PID >= 2), 4 KB'lık Kod belleğini iade et
-            //if (target->id >= 2 && target->app_base != 0) {
-            //    free((void*)target->app_base);
-            //}
+            curr->next = target->next; 
             
-            // 3. Görevin kendi kayıt bloğunu (task_t) sistemden sil
+            if (target->stack_base != 0) free((void*)target->stack_base);
+            if (target->id >= 2 && target->app_base != 0) free((void*)target->app_base);
             free(target);
-            
             return; 
         }
         curr = curr->next;
     } while (curr != ready_queue);
+}
+
+// ZIRH 2'Yİ İPTAL EDİYORUZ: Eski, kusursuz ELF Yükleyicisi geri dönüyor!
+unsigned int load_elf_segments(unsigned char* elf_data) {
+    elf32_ehdr_t* header = (elf32_ehdr_t*)elf_data;
+    
+    // Sihirli ELF İmzası Kontrolü (0x7F 'E' 'L' 'F')
+    if (header->e_ident[0] != 0x7F || header->e_ident[1] != 'E' || 
+        header->e_ident[2] != 'L' || header->e_ident[3] != 'F') {
+        return 0; // Dosya ELF değilse 0 döndür
+    }
+    
+    elf32_phdr_t* phdr = (elf32_phdr_t*)(elf_data + header->e_phoff);
+    
+    for (int i = 0; i < header->e_phnum; i++) {
+        if (phdr[i].p_type == 1) { // 1 = PT_LOAD (Yüklenebilir Segment)
+            unsigned char* dest = (unsigned char*)phdr[i].p_vaddr;
+            unsigned char* src = elf_data + phdr[i].p_offset;
+            
+            // Diskteki salt veriyi RAM'e (Örn: 0x400000) kopyala
+            for (unsigned int j = 0; j < phdr[i].p_filesz; j++) {
+                dest[j] = src[j];
+            }
+            
+            // Kalan .bss kısmını (Sıfırla başlatılan değişkenler) sıfırla
+            for (unsigned int j = phdr[i].p_filesz; j < phdr[i].p_memsz; j++) {
+                dest[j] = 0;
+            }
+        }
+    }
+    return header->e_entry; // Bağlayıcı scriptinde ayarlanan giriş noktasını dön
 }
 void get_process_list(char* buffer) {
     strcpy(buffer, "PID | DURUM  | BELLEK ADRESI\n");
@@ -219,33 +243,4 @@ void get_process_list(char* buffer) {
         
         curr = curr->next;
     } while (curr != ready_queue);
-}
-unsigned int load_elf_segments(unsigned char* elf_data) {
-    elf32_ehdr_t* header = (elf32_ehdr_t*)elf_data;
-    
-    // Sihirli ELF İmzası Kontrolü (0x7F 'E' 'L' 'F')
-    if (header->e_ident[0] != 0x7F || header->e_ident[1] != 'E' || 
-        header->e_ident[2] != 'L' || header->e_ident[3] != 'F') {
-        return 0; // Dosya ELF değilse 0 döndür
-    }
-    
-    elf32_phdr_t* phdr = (elf32_phdr_t*)(elf_data + header->e_phoff);
-    
-    for (int i = 0; i < header->e_phnum; i++) {
-        if (phdr[i].p_type == 1) { // 1 = PT_LOAD (Yüklenebilir Segment)
-            unsigned char* dest = (unsigned char*)phdr[i].p_vaddr;
-            unsigned char* src = elf_data + phdr[i].p_offset;
-            
-            // Diskteki salt veriyi RAM'e (Örn: 0x400000) kopyala
-            for (unsigned int j = 0; j < phdr[i].p_filesz; j++) {
-                dest[j] = src[j];
-            }
-            
-            // Kalan .bss kısmını (Sıfırla başlatılan değişkenler) sıfırla
-            for (unsigned int j = phdr[i].p_filesz; j < phdr[i].p_memsz; j++) {
-                dest[j] = 0;
-            }
-        }
-    }
-    return header->e_entry; // Bağlayıcı scriptinde ayarlanan giriş noktasını dön
 }

@@ -43,6 +43,9 @@ typedef struct {
     int shape_x[MAX_SHAPES_PER_WIN]; int shape_y[MAX_SHAPES_PER_WIN];
     int shape_w[MAX_SHAPES_PER_WIN]; int shape_h[MAX_SHAPES_PER_WIN];
     unsigned int shape_color[MAX_SHAPES_PER_WIN];
+    // --- YENİ EKLENEN DURUMLAR ---
+    int is_minimized; // 1 = Görev çubuğunda gizli, 0 = Ekranda
+    int prev_x, prev_y, prev_w, prev_h; // Tam ekran yapılınca geri dönülecek boyutlar
 } window_t;
 
 window_t windows[MAX_WINDOWS];
@@ -57,6 +60,9 @@ int task_to_kill = -1; // Cellat motorunun hedefini tutar
 
 int last_mouse_x = 0, last_mouse_y = 0;
 unsigned int current_bg_color = 0x001B26;
+// YENİ: Context Menu (Seçenekler) Durum Değişkenleri
+int context_menu_open = 0;
+int context_menu_hover_idx = -1; // 0: Küçült, 1: Tam Ekran, 2: Kapat
 // YENİ: TERMINAL SCROLLING MOTORU
 #define TERMINAL_MAX_LINES 16
 #define TERMINAL_LINE_LEN 80
@@ -104,6 +110,7 @@ int api_create_window(const char* title, int w, int h) {
             windows[i].y = 120 + (i * 20);
             windows[i].w = w; windows[i].h = h;
             windows[i].is_open = 1; windows[i].is_dragging = 0;
+            windows[i].is_minimized = 0;
             
             int j = 0;
             while (real_title[j] != '\0' && j < 31) {
@@ -353,10 +360,35 @@ void draw_taskbar() {
         }
     }
 }
+// YENİ: Açılır Seçenekler Menüsü Çizim Motoru
+void draw_context_menu() {
+    if (!context_menu_open || focused_window < 0 || !windows[focused_window].is_open) return;
+    
+    int menu_x = 55; // = Butonunun hizası
+    int menu_y = 728 - 90; // 3 seçenek x 30 piksel = 90 piksel yukarı
+    int menu_w = 120;
+    
+    // Arka plan
+    draw_rect(menu_x, menu_y, menu_w, 90, 0x00222222);
+    
+    // Seçenek 1: Küçült (Hover: Gri)
+    unsigned int c0 = (context_menu_hover_idx == 0) ? 0x00555555 : 0x00222222;
+    draw_rect(menu_x, menu_y, menu_w, 30, c0);
+    draw_string(menu_x + 10, menu_y + 8, "Kucult", 0x00FFFFFF, c0);
+    
+    // Seçenek 2: Tam Ekran (Hover: Gri)
+    unsigned int c1 = (context_menu_hover_idx == 1) ? 0x00555555 : 0x00222222;
+    draw_rect(menu_x, menu_y + 30, menu_w, 30, c1);
+    draw_string(menu_x + 10, menu_y + 38, "Tam Ekran", 0x00FFFFFF, c1);
+    
+    // Seçenek 3: Kapat (Hover: Kritik Kırmızı)
+    unsigned int c2 = (context_menu_hover_idx == 2) ? 0x00FF2D55 : 0x00222222; 
+    draw_rect(menu_x, menu_y + 60, menu_w, 30, c2);
+    draw_string(menu_x + 10, menu_y + 68, "Kapat", 0x00FFFFFF, c2);
+}
+
 void render_gui() {
     if (!force_redraw) return;
-    
-    // Eğer işletim sistemi 'Full Redraw' (1) istediyse tüm ekranı kirlet
     if (force_redraw == 1) mark_screen_dirty(); 
     force_redraw = 0;
     
@@ -375,14 +407,11 @@ void render_gui() {
 
     for (int i = 0; i < MAX_WINDOWS; i++) {
         int w_idx = draw_order[i];
-        if (!windows[w_idx].is_open) continue;
+        
+        // YENİ KORUMA: Eğer pencere kapalıysa VEYA küçültülmüşse ekrana asla çizme!
+        if (!windows[w_idx].is_open || windows[w_idx].is_minimized) continue;
         
         draw_window(&windows[w_idx]); 
-        
-        // ==========================================
-        // YENİ: PENCERE İÇERİĞİ İÇİN BOUNDARY CLIPPING
-        // ==========================================
-        // Uygulamalar şekilleri veya yazıları pencerenin dışına taşıramaz!
         set_clipping_rect(windows[w_idx].x + 2, windows[w_idx].y + 32, windows[w_idx].w - 4, windows[w_idx].h - 34);
 
         if (w_idx == 0) {
@@ -392,7 +421,6 @@ void render_gui() {
             draw_string(windows[0].x + 10, windows[0].y + windows[0].h - 25, user_input, 0x000000AA, 0xFFFFFFFF); 
         } 
         else if (w_idx == 1) {
-            // (Sistem Monitörü UI Kodları - BURAYI KESMEDEN AYNEN KORU)
             draw_string(windows[1].x + 10, windows[1].y + 40, "PID  DURUM   CPU%", 0x00000000, 0xFFFFFFFF);
             draw_rect(windows[1].x + 10, windows[1].y + 55, windows[1].w - 20, 2, 0x00BBBBBB);
 
@@ -433,11 +461,12 @@ void render_gui() {
                           windows[w_idx].shape_color[s]);
             }
         }
-        
-        // Pencere içerik çizimi bitti, dışarıya taşma zırhını kaldır:
         reset_clipping_rect();
     }
+    
     draw_taskbar();
+    // YENİ: Context Menu en üst katmanda (Görev çubuğunun bile üstünde) çizilir
+    draw_context_menu(); 
     draw_cursor(mouse_x, mouse_y);
     swap_buffers();
 }
@@ -556,90 +585,138 @@ void process_mouse_events() {
     int delta_y = mouse_y - last_mouse_y;
 
     if (delta_x != 0 || delta_y != 0) {
-        
-        // YENİ: Sadece farenin 'Eski' konumunu kirlet (Silinmesi için)
         add_dirty_rect(last_mouse_x, last_mouse_y, 16, 16);
+
+        // 1. MENÜ AÇIKKEN HOVER (Üzerine Gelme) EFEKTİ
+        if (context_menu_open) {
+            int old_hover = context_menu_hover_idx;
+            if (mouse_x >= 55 && mouse_x <= 175 && mouse_y >= 638 && mouse_y < 728) {
+                context_menu_hover_idx = (mouse_y - 638) / 30; // 0, 1 veya 2
+            } else {
+                context_menu_hover_idx = -1;
+            }
+            if (old_hover != context_menu_hover_idx) force_redraw = 1;
+        }
 
         if (mouse_left_button) {
             if (!any_window_dragging) {
+                
+                // 2. MENÜ AÇIKSA BÜTÜN TIKLAMALARI ELE GEÇİR
+                if (context_menu_open) {
+                    // Tıklama menünün içi mi?
+                    if (mouse_x >= 55 && mouse_x <= 175 && mouse_y >= 638 && mouse_y < 728) {
+                        int action = (mouse_y - 638) / 30;
+                        
+                        if (action == 0) { // KÜÇÜLT
+                            windows[focused_window].is_minimized = 1;
+                            // Ekranda kalan başka bir pencereye odaklan
+                            for (int i = 0; i < MAX_WINDOWS; i++) {
+                                if (windows[i].is_open && !windows[i].is_minimized) { focused_window = i; break; }
+                            }
+                        } 
+                        else if (action == 1) { // TAM EKRAN (Boyutlandırma Motoru)
+                            if (windows[focused_window].w == 1024) { // Zaten tam ekransa eski haline dön
+                                windows[focused_window].x = windows[focused_window].prev_x;
+                                windows[focused_window].y = windows[focused_window].prev_y;
+                                windows[focused_window].w = windows[focused_window].prev_w;
+                                windows[focused_window].h = windows[focused_window].prev_h;
+                            } else {
+                                // Büyütmeden önce eski koordinatları yedekle
+                                windows[focused_window].prev_x = windows[focused_window].x;
+                                windows[focused_window].prev_y = windows[focused_window].y;
+                                windows[focused_window].prev_w = windows[focused_window].w;
+                                windows[focused_window].prev_h = windows[focused_window].h;
+                                // Ekranı görev çubuğuna kadar kapla
+                                windows[focused_window].x = 0;
+                                windows[focused_window].y = 0;
+                                windows[focused_window].w = 1024;
+                                windows[focused_window].h = 728; 
+                            }
+                        }
+                        else if (action == 2) { // KAPAT (Cellat)
+                            if (focused_window >= 2) {
+                                task_to_kill = windows[focused_window].owner_task_id;
+                            } else {
+                                windows[focused_window].is_open = 0;
+                            }
+                            for (int i = 0; i < MAX_WINDOWS; i++) {
+                                if (windows[i].is_open && !windows[i].is_minimized) { focused_window = i; break; }
+                            }
+                        }
+                    }
+                    
+                    // Menüye de tıklansa dışarıya da tıklansa menüyü kapat ve yut
+                    context_menu_open = 0;
+                    force_redraw = 1;
+                    last_mouse_x = mouse_x; last_mouse_y = mouse_y;
+                    return; 
+                }
+
+                // 3. GÖREV ÇUBUĞUNA TIKLAMA
                 if (mouse_y >= 728) {
-                    // SOL BÖLGE - Buton 1: Önceki Uygulama (<)
+                    // Buton 1: Önceki Uygulama (<)
                     if (mouse_x >= 10 && mouse_x <= 45) {
                         int prev_idx = focused_window;
                         for (int i = 1; i < MAX_WINDOWS; i++) {
-                            // Modulo (kalan bulma) ile dizinin başına dönebilen geri sayım
                             int check = (focused_window - i + MAX_WINDOWS) % MAX_WINDOWS;
-                            if (windows[check].is_open) {
-                                prev_idx = check;
-                                break;
-                            }
+                            if (windows[check].is_open) { prev_idx = check; break; }
                         }
                         if (prev_idx != focused_window) {
+                            windows[prev_idx].is_minimized = 0; // Küçültülmüşse ekrana geri al!
                             focused_window = prev_idx;
                             force_redraw = 1;
                         }
                     }
-                    
-                    // SOL BÖLGE - Buton 2: Seçenekler (=)
+                    // Buton 2: Seçenekler Menüsü Aç/Kapa (=)
                     else if (mouse_x >= 55 && mouse_x <= 95) {
-                        // Şimdilik test amaçlı: Aktif pencereyi anında KAPAT!
                         if (focused_window >= 0 && windows[focused_window].is_open) {
-                            windows[focused_window].is_open = 0;
+                            context_menu_open = 1; 
                             force_redraw = 1;
-                            
-                            // Ekran boş kalmasın, açık başka bir pencere varsa ona odaklan
-                            for (int i = 0; i < MAX_WINDOWS; i++) {
-                                if (windows[i].is_open) { focused_window = i; break; }
-                            }
                         }
                     }
-                    
-                    // SOL BÖLGE - Buton 3: Sonraki Uygulama (>)
+                    // Buton 3: Sonraki Uygulama (>)
                     else if (mouse_x >= 105 && mouse_x <= 140) {
                         int next_idx = focused_window;
                         for (int i = 1; i < MAX_WINDOWS; i++) {
-                            // Dizinin sonuna gelince başa dönen ileri sayım
                             int check = (focused_window + i) % MAX_WINDOWS;
-                            if (windows[check].is_open) {
-                                next_idx = check;
-                                break;
-                            }
+                            if (windows[check].is_open) { next_idx = check; break; }
                         }
                         if (next_idx != focused_window) {
+                            windows[next_idx].is_minimized = 0; // Küçültülmüşse ekrana geri al!
                             focused_window = next_idx;
                             force_redraw = 1;
                         }
                     }
-                    
-                    // ORTA BÖLGE - Pencerelerin Kendi Butonları
+                    // Pencerelerin Kendi Butonları
                     else if (mouse_x >= 150 && mouse_x < 930) {
                         int btn_index = (mouse_x - 150) / 130;
                         int current_idx = 0;
                         for (int i = 0; i < MAX_WINDOWS; i++) {
                             if (windows[i].is_open) {
                                 if (current_idx == btn_index) {
-                                    if (focused_window != i) {
-                                        focused_window = i; 
-                                        force_redraw = 1; 
-                                    }
+                                    windows[i].is_minimized = 0; // Küçültülmüşse ekrana geri al!
+                                    if (focused_window != i) focused_window = i; 
+                                    force_redraw = 1; 
                                     break;
                                 }
                                 current_idx++;
                             }
                         }
                     }
-                    
                     last_mouse_x = mouse_x; last_mouse_y = mouse_y;
                     return;
                 } 
+                
+                // 4. MASAÜSTÜ PENCERELERİNE TIKLAMA
                 int clicked_window = -1;
-                if (windows[focused_window].is_open &&
+                if (windows[focused_window].is_open && !windows[focused_window].is_minimized &&
                     mouse_x >= windows[focused_window].x && mouse_x <= windows[focused_window].x + windows[focused_window].w &&
                     mouse_y >= windows[focused_window].y && mouse_y <= windows[focused_window].y + windows[focused_window].h) {
                     clicked_window = focused_window;
                 } else {
                     for (int i = 0; i < MAX_WINDOWS; i++) {
-                        if (windows[i].is_open && i != focused_window &&
+                        // Küçültülmüş pencereye tıklanamaz koruması
+                        if (windows[i].is_open && i != focused_window && !windows[i].is_minimized &&
                             mouse_x >= windows[i].x && mouse_x <= windows[i].x + windows[i].w &&
                             mouse_y >= windows[i].y && mouse_y <= windows[i].y + windows[i].h) {
                             clicked_window = i; break;
@@ -650,19 +727,17 @@ void process_mouse_events() {
                 if (clicked_window != -1) {
                     if (focused_window != clicked_window) {
                         focused_window = clicked_window; 
-                        force_redraw = 1; // Z-Order değiştiği için Full Redraw iste!
+                        force_redraw = 1; 
                     }
 
                     if (mouse_x >= windows[focused_window].x + windows[focused_window].w - 30 &&
                         mouse_x <= windows[focused_window].x + windows[focused_window].w &&
                         mouse_y >= windows[focused_window].y && mouse_y <= windows[focused_window].y + 30) {
                         
-                        if (focused_window >= 2) {
-                            task_to_kill = windows[focused_window].owner_task_id;
-                        } else {
-                            windows[focused_window].is_open = 0;
-                        }
-                        force_redraw = 1; // Ekrandan obje silindi, Full Redraw iste!
+                        if (focused_window >= 2) task_to_kill = windows[focused_window].owner_task_id;
+                        else windows[focused_window].is_open = 0;
+                        
+                        force_redraw = 1; 
                     }
                     else if (mouse_y >= windows[focused_window].y && mouse_y <= windows[focused_window].y + 30) {
                         windows[focused_window].is_dragging = 1;
@@ -672,13 +747,9 @@ void process_mouse_events() {
             }
 
             if (any_window_dragging && windows[focused_window].is_dragging) {
-                // Sürükleme başladı! Pencerenin ESKİ konumunu kirlet
                 add_dirty_rect(windows[focused_window].x, windows[focused_window].y, windows[focused_window].w, windows[focused_window].h);
-                
                 windows[focused_window].x += delta_x;
                 windows[focused_window].y += delta_y;
-                
-                // Pencerenin YENİ konumunu kirlet
                 add_dirty_rect(windows[focused_window].x, windows[focused_window].y, windows[focused_window].w, windows[focused_window].h);
             }
         } else {
@@ -686,12 +757,8 @@ void process_mouse_events() {
             any_window_dragging = 0;
         }
         
-        // Farenin YENİ konumunu kirlet
         add_dirty_rect(mouse_x, mouse_y, 16, 16);
-
-        // Sistemin Full Redraw'a (1) ihtiyacı yoksa, onu Fast Redraw'a (2) al
         if (force_redraw == 0) force_redraw = 2; 
-        
         last_mouse_x = mouse_x; last_mouse_y = mouse_y;
     }
 }
@@ -717,11 +784,12 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     init_rtl8139();
     __asm__ __volatile__ ("sti");
 
-    windows[0].id = 0; windows[0].is_open = 1; windows[0].is_dragging = 0;
+    windows[0].id = 0; windows[0].is_open = 1; windows[0].is_dragging = 0; windows[0].is_minimized = 0;
+    
     windows[0].x = 100; windows[0].y = 100; windows[0].w = 450; windows[0].h = 350;
     strcpy(windows[0].title, "ArdaOS Terminali");
-    
-    windows[1].id = 1; windows[1].is_open = 1; windows[1].is_dragging = 0;
+    // ...
+    windows[1].id = 1; windows[1].is_open = 1; windows[1].is_dragging = 0; windows[1].is_minimized = 0;
     windows[1].x = 600; windows[1].y = 150; windows[1].w = 300; windows[1].h = 200;
     strcpy(windows[1].title, "Sistem Monitoru");
 

@@ -524,14 +524,10 @@ void render_gui() {
 char pending_command[256] = "";
 volatile int command_ready = 0;
 
-// YENİ: Sadece Uygulama Yüklemeyi Bilen Saf Çekirdek Fonksiyonu
 int api_exec_app(const char* name, const char* args) {
     char raw_name[16];
     int i = 0;
-    while(name[i] != '\0' && name[i] != '.' && i < 15) {
-        raw_name[i] = name[i];
-        i++;
-    }
+    while(name[i] != '\0' && name[i] != '.' && i < 15) { raw_name[i] = name[i]; i++; }
     raw_name[i] = '\0';
     
     char ext[4] = "ELF";
@@ -548,14 +544,8 @@ int api_exec_app(const char* name, const char* args) {
     extern unsigned char elf_load_buffer[];
     int file_size = ardaos_read_file(fat_name, ext, elf_load_buffer);
     if (file_size > 0) {
-        // YENİ: Her uygulamaya RAM'de ÖZEL BİR EV tahsis et!
-        extern void* malloc(unsigned int);
-        unsigned char* app_memory = (unsigned char*)malloc(file_size + 4096); 
-        
-        for (int k = 0; k < file_size; k++) app_memory[k] = elf_load_buffer[k];
-        for (int k = file_size; k < file_size + 4096; k++) app_memory[k] = 0; // RAM'i temizle
-        
-        int pid = create_task((void (*)())app_memory, (unsigned int)app_memory, (char*)args);
+        // MALLOC İPTAL! Doğrudan statik elf_load_buffer kullanıyoruz (Çünkü CR3 haritasında yeri garanti)
+        int pid = create_task((void (*)())elf_load_buffer, (unsigned int)elf_load_buffer, (char*)args);
         return pid;
     }
     return -1;

@@ -150,7 +150,7 @@ void yield() {
     __asm__ __volatile__ ("int $129"); // Saati bozmayan yeni görev değiştiricimiz!
 }
 
-// ZIRH 1: Silinen görev sıranın başındaysa (ready_queue) sistemi boşa düşürme!
+// KUSURSUZ CELLAT: Statik hafızayı silmesini engelleyen zırh!
 void kill_task_by_id(int task_id) {
     task_t* curr = ready_queue;
     if (curr == 0) return;
@@ -158,15 +158,19 @@ void kill_task_by_id(int task_id) {
         if (curr->next->id == task_id) { 
             task_t* target = curr->next;
             
-            // YENİ: Sistemin ana işaretçisi siliniyorsa, kaydır!
             if (ready_queue == target) {
                 ready_queue = target->next;
             }
-            
             curr->next = target->next; 
             
             if (target->stack_base != 0) free((void*)target->stack_base);
-            if (target->id >= 2 && target->app_base != 0) free((void*)target->app_base);
+            
+            // KİLİT ZIRH: Eğer app_base statik elf_load_buffer ise, KESİNLİKLE FREE YAPMA!
+            extern unsigned char elf_load_buffer[];
+            if (target->id >= 2 && target->app_base != 0 && target->app_base != (unsigned int)elf_load_buffer) {
+                free((void*)target->app_base);
+            }
+            
             free(target);
             return; 
         }
@@ -174,35 +178,24 @@ void kill_task_by_id(int task_id) {
     } while (curr != ready_queue);
 }
 
-// ZIRH 2'Yİ İPTAL EDİYORUZ: Eski, kusursuz ELF Yükleyicisi geri dönüyor!
+// ORİJİNAL ELF YÜKLEYİCİ: Uygulamayı kendi CR3 sanal haritasına (0x400000) güvenle kopyalar
 unsigned int load_elf_segments(unsigned char* elf_data) {
     elf32_ehdr_t* header = (elf32_ehdr_t*)elf_data;
-    
-    // Sihirli ELF İmzası Kontrolü (0x7F 'E' 'L' 'F')
     if (header->e_ident[0] != 0x7F || header->e_ident[1] != 'E' || 
         header->e_ident[2] != 'L' || header->e_ident[3] != 'F') {
-        return 0; // Dosya ELF değilse 0 döndür
+        return 0; 
     }
     
     elf32_phdr_t* phdr = (elf32_phdr_t*)(elf_data + header->e_phoff);
-    
     for (int i = 0; i < header->e_phnum; i++) {
-        if (phdr[i].p_type == 1) { // 1 = PT_LOAD (Yüklenebilir Segment)
+        if (phdr[i].p_type == 1) { 
             unsigned char* dest = (unsigned char*)phdr[i].p_vaddr;
             unsigned char* src = elf_data + phdr[i].p_offset;
-            
-            // Diskteki salt veriyi RAM'e (Örn: 0x400000) kopyala
-            for (unsigned int j = 0; j < phdr[i].p_filesz; j++) {
-                dest[j] = src[j];
-            }
-            
-            // Kalan .bss kısmını (Sıfırla başlatılan değişkenler) sıfırla
-            for (unsigned int j = phdr[i].p_filesz; j < phdr[i].p_memsz; j++) {
-                dest[j] = 0;
-            }
+            for (unsigned int j = 0; j < phdr[i].p_filesz; j++) dest[j] = src[j];
+            for (unsigned int j = phdr[i].p_filesz; j < phdr[i].p_memsz; j++) dest[j] = 0;
         }
     }
-    return header->e_entry; // Bağlayıcı scriptinde ayarlanan giriş noktasını dön
+    return header->e_entry; 
 }
 void get_process_list(char* buffer) {
     strcpy(buffer, "PID | DURUM  | BELLEK ADRESI\n");

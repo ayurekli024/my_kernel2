@@ -33,13 +33,12 @@ void pmm_free_block(void* physical_address) {
 }
 
 // ============================================================================
-// SAYFALAMA (PAGING) TABLOLARI
+// SAYFALAMA (PAGING) TABLOLARI VE YENİ İZOLASYON MİMARİSİ
 // ============================================================================
 unsigned int page_directory[1024] __attribute__((aligned(4096)));
-unsigned int first_page_table[1024] __attribute__((aligned(4096)));
-unsigned int second_page_table[1024] __attribute__((aligned(4096)));
-// YENİ: IPC için 3. Tablo (Kusursuz Hizalama)
-unsigned int third_page_table[1024] __attribute__((aligned(4096))); 
+unsigned int first_page_table[1024] __attribute__((aligned(4096))); // 0 - 4 MB
+unsigned int heap_page_table[1024] __attribute__((aligned(4096)));  // 8 - 12 MB
+unsigned int dma_page_table[1024] __attribute__((aligned(4096)));   // 12 - 16 MB
 
 unsigned int vbe_page_tables[4][1024] __attribute__((aligned(4096)));
 extern void enable_paging(unsigned int page_dir_address);
@@ -47,30 +46,34 @@ extern void enable_paging(unsigned int page_dir_address);
 void init_paging(unsigned int framebuffer_addr) {
     for(int i = 0; i < 1024; i++) page_directory[i] = 0x00000002;
     
-    // 1. Tablo (0 - 4 MB)
+    // 1. Tablo (0 - 4 MB) -> Kernel, VGA ve BSS
     for(unsigned int i = 0; i < 1024; i++) {
-        if (i < 256) first_page_table[i] = (i * 4096) | 3; // Kernel
-        else first_page_table[i] = (i * 4096) | 7;         // Heap Başlangıcı
+        first_page_table[i] = (i * 4096) | 3;
     }
-
-    // 2. Tablo (4 - 8 MB)
-    for(unsigned int i = 0; i < 1024; i++) {
-        second_page_table[i] = (0x400000 + (i * 4096)) | 7;
-    }
-
-    // 3. Tablo (8 - 12 MB) - IPC Toplantı Odası
-    for(unsigned int i = 0; i < 1024; i++) {
-        third_page_table[i] = (0x800000 + (i * 4096)) | 7;
-    }
-
-    // Dizinleri (Directory) ayarla ve hepsine KULLANICI İZNİ (| 7) ver!
-    page_directory[0] = ((unsigned int)first_page_table) | 7; 
-    page_directory[1] = ((unsigned int)second_page_table) | 7; 
-    page_directory[2] = ((unsigned int)third_page_table) | 7; 
     
+    // PD[1] (4 - 8 MB) BİLEREK BOŞ BIRAKILDI! 
+    // Burası sadece uygulamalara (0x400000 adresine) tahsis edilecek.
+    
+    // 3. Tablo (8 - 12 MB) -> Kernel Heap (Dinamik Bellek buraya taşındı)
+    for(unsigned int i = 0; i < 1024; i++) {
+        heap_page_table[i] = (0x800000 + (i * 4096)) | 7;
+    }
+
+    // 4. Tablo (12 - 16 MB) -> Ağ Kartı DMA & IPC Toplantı Odası
+    for(unsigned int i = 0; i < 1024; i++) {
+        dma_page_table[i] = (0xC00000 + (i * 4096)) | 7;
+    }
+
+    // Dizinleri (Directory) yerleştir
+    page_directory[0] = ((unsigned int)first_page_table) | 7; 
+    // page_directory[1] BOŞ KALDI!
+    page_directory[2] = ((unsigned int)heap_page_table) | 7; 
+    page_directory[3] = ((unsigned int)dma_page_table) | 7; 
+    
+    // Grafik Kartı Belleği (Genelde 16MB üstündedir, dinamik hesaplanır)
     if (framebuffer_addr != 0) {
         unsigned int pd_index = framebuffer_addr >> 22;
-        if (pd_index > 1) { 
+        if (pd_index > 3) { 
             for (int t = 0; t < 4; t++) { 
                 unsigned int block_start = (pd_index + t) << 22; 
                 for(int i = 0; i < 1024; i++) vbe_page_tables[t][i] = (block_start + (i * 4096)) | 7; 
@@ -81,68 +84,54 @@ void init_paging(unsigned int framebuffer_addr) {
     enable_paging((unsigned int)page_directory);
 }
 
-// IPC Toplantı Odasının Adresini Veren API
+// IPC Toplantı Odasının Adresi
 void* api_get_shared_memory(void) {
-    return (void*)0x800000; 
+    return (void*)0xE00000; // 14. MB'a güvenli bölgeye taşındı
 }
+
 // ============================================================================
 // DMA (DOĞRUDAN BELLEK ERİŞİMİ) YÖNETİCİSİ - AĞ KARTI İÇİN
 // ============================================================================
-// RTL8139 gelen paketleri çekirdeği yormadan doğrudan RAM'e yazar.
-// Bunun için 6. MB (0x600000) civarında, fiziksel olarak ardışık bir alan ayırıyoruz.
-unsigned int dma_memory_pointer = 0x600000; 
+unsigned int dma_memory_pointer = 0xC00000; // 12. MB'a taşındı
 
 void* dma_alloc(unsigned int size) {
     void* ptr = (void*)dma_memory_pointer;
     dma_memory_pointer += size;
-    
-    // Belleği donanım standartları gereği 4 bayt (32-bit) sınırına hizala
     if (dma_memory_pointer % 4 != 0) {
         dma_memory_pointer += (4 - (dma_memory_pointer % 4));
     }
     return ptr;
 }
+
 // ============================================================================
 // DİNAMİK BELLEK YÖNETİCİSİ (HEAP / MALLOC / FREE)
 // ============================================================================
-
-#define HEAP_START 0x200000 // Heap başlangıç adresi (2 MB noktası)
-// YENİ: 1 MB'lık alanı 5 MB'a (5242880 bayt) çıkardık! (3 MB ekran + 2 MB ekstra)
-#define HEAP_SIZE  5242880  
+#define HEAP_START 0x800000 // BÜYÜK GÖÇ: Heap başlangıcı 8. MB'a alındı!
+#define HEAP_SIZE  4194304  // Tam 4 MB'lık devasa alan
 
 struct block_header* heap_head;
 struct block_header* next_fit_ptr;
-// Heap sistemini ilk kez ayağa kaldıran fonksiyon
 unsigned int total_used_memory = 0;
+
 void init_heap() {
     heap_head = (struct block_header*) HEAP_START;
     heap_head->size = HEAP_SIZE - sizeof(struct block_header);
     heap_head->is_free = 1;
     heap_head->next = 0; 
-    
-    // Başlangıçta son kalınan yer, doğal olarak heap'in en başıdır
     next_fit_ptr = heap_head; 
-    
-    print_string("Dinamik Bellek (Heap) 2 MB adresinde baslatildi (Next-Fit aktif).\n");
+    print_string("Dinamik Bellek (Heap) 8. MB adresine guvenle tasindi.\n");
 }
 
-// First-Fit algoritması ile çalışan malloc fonksiyonumuz
-// Next-Fit algoritması ile çalışan malloc fonksiyonumuz
 void* malloc(unsigned int size) {
     if (size == 0) return 0;
+    size = (size + 3) & ~3; 
 
-    size = (size + 3) & ~3; // 4 bayt hizalama
-
-    // Aramaya en son kaldığımız yerden başlıyoruz
     struct block_header* current = next_fit_ptr;
-    struct block_header* start_search = current; // Döngünün sonsuza girmemesi için başladığımız yeri kaydediyoruz
-    int wrapped = 0; // Listenin başına dönüp dönmediğimizi takip eden bayrak
+    struct block_header* start_search = current; 
+    int wrapped = 0; 
 
     while (current != 0) {
-        // Eğer blok boşsa ve istediğimiz boyuta yetiyorsa
         if (current->is_free && current->size >= size) {
-            
-            // Split (Bölme) işlemi (Eski kod ile tamamen aynı)
             if (current->size > size + sizeof(struct block_header) + 4) {
                 struct block_header* new_block = (struct block_header*)((unsigned int)current + sizeof(struct block_header) + size);
                 new_block->size = current->size - size - sizeof(struct block_header);
@@ -152,96 +141,74 @@ void* malloc(unsigned int size) {
                 current->size = size;
                 current->next = new_block;
             }
-            
             current->is_free = 0;
             
-            // --- NEXT-FIT SİHRİ BURADA ---
-            // Bir dahaki sefere aramaya bu bloğun hemen sonrasından başla
             next_fit_ptr = current->next;
-            // Eğer heap'in en sonuna geldiysek, işaretçiyi tekrar başa sar
-            if (next_fit_ptr == 0) {
-                next_fit_ptr = heap_head;
-            }
+            if (next_fit_ptr == 0) next_fit_ptr = heap_head;
             total_used_memory += current->size;
             return (void*)((unsigned int)current + sizeof(struct block_header));
         }
-        
-        current = current->next; // Bir sonraki bloğa geç
+        current = current->next; 
 
-        // --- DAİRESEL ARAMA (WRAP-AROUND) ---
-        // Eğer listenin sonuna geldiysek ve daha önce başa dönmediysek, başa dön!
         if (current == 0 && !wrapped) {
             current = heap_head;
             wrapped = 1;
         }
-
-        // Eğer başa dönüp tüm listeyi taradıysak ve başladığımız yere geri geldiysek, yer yok demektir.
-        if (wrapped && current == start_search) {
-            break;
-        }
+        if (wrapped && current == start_search) break;
     }
-    
     print_string("HATA: Heap uzerinde yeterli bellek kalmadi!\n");
     return 0; 
 }
 
-// Tahsis edilen belleği sisteme geri iade eden fonksiyon
 void free(void* ptr) {
     if (ptr == 0) return;
-
-    // Kullanıcının veri adresinden geriye giderek gizli kimlik kartını (header) bul
     struct block_header* block = (struct block_header*)((unsigned int)ptr - sizeof(struct block_header));
-    block->is_free = 1; // Bloğu serbest bırak
+    block->is_free = 1; 
     total_used_memory -= block->size;
-    // Parçalanmayı (Fragmentation) önlemek için Blok Birleştirme (Coalescing)
-    // Tüm listeyi tara, yan yana duran iki "boş" blok varsa onları tek bir büyük blok yap
+
     struct block_header* current = heap_head;
     while (current != 0 && current->next != 0) {
         if (current->is_free && current->next->is_free) {
             current->size += current->next->size + sizeof(struct block_header);
             current->next = current->next->next;
         } else {
-            current = current->next; // Sadece birleşme yoksa ilerle
+            current = current->next; 
         }
     }
     next_fit_ptr = heap_head;
 }
+
+// ==========================================
+// UYGULAMALAR İÇİN İZOLE FİZİKSEL BELLEK (PER-PROCESS PAGING)
+// ==========================================
 extern unsigned int page_directory[1024];
 
-// Yeni bir görev için tamamen bağımsız bir Sayfa Dizini (CR3) oluşturur
-// ==========================================
-// YENİ: UYGULAMALAR İÇİN İZOLE FİZİKSEL BELLEK (PER-PROCESS PAGING)
-// ==========================================
-// 8 Görev için statik tablo ve fiziksel RAM havuzu ayırıyoruz
+// YENİ ZIRH: MMU (Sayfa Tabloları) için kusursuz 4096 bayt hizalı bellek ayırıcı
+void* alloc_page_aligned() {
+    extern unsigned int dma_memory_pointer;
+    // Eğer adres 4096'nın tam katı değilse, onu zorla bir sonraki 4096'ya yuvarla!
+    if (dma_memory_pointer % 4096 != 0) {
+        dma_memory_pointer += (4096 - (dma_memory_pointer % 4096));
+    }
+    void* ptr = (void*)dma_memory_pointer;
+    dma_memory_pointer += 4096; // 1 Tablo = 4 KB
+    return ptr;
+}
+
+// ---------------------------------------------------------
 unsigned int task_page_dirs[8][1024] __attribute__((aligned(4096)));
-unsigned int task_page_tables[8][1024] __attribute__((aligned(4096)));
 int next_task_id = 0;
 
 unsigned int* create_task_page_dir() {
     if (next_task_id >= 8) return (unsigned int*)page_directory; 
     
     unsigned int* pd = task_page_dirs[next_task_id];
-    unsigned int* pt = task_page_tables[next_task_id];
     
-    // 1. Çekirdek haritasını klonla (Kernel Heap, pd[1] dahil artık TAMAMEN güvende!)
+    // Sadece Çekirdek haritasını (Kernel, Heap, DMA) klonla.
+    // Uygulamanın sayfalarını Akıllı Yükleyici (map_vaddr_to_paddr) kendisi hatasız ekleyecek!
     for(int i = 0; i < 1024; i++) {
         pd[i] = page_directory[i];
     }
-    
-    // 2. 32. Megabayt alanını (8. İndeks) temizle
-    for(int i = 0; i < 1024; i++) {
-        pt[i] = 0x00000002; // Not Present
-    }
-    
-    // 3. FİZİKSEL AYRIŞTIRMA (Fiziksel RAM hala 12. MB'dan veriliyor)
-    unsigned int phys_start = 0xC00000 + (next_task_id * 0x100000); 
-    
-    for(int i = 0; i < 256; i++) { // 1 MB alan = 256 Sayfa (4KB)
-        pt[i] = (phys_start + (i * 4096)) | 7; // User | RW | Present
-    }
-    
-    // 4. YENİ: İzole tabloyu pd[1] yerine 8. İndekse (32. MB Sanal Adres) bağla!
-    pd[8] = ((unsigned int)pt) | 7;
     
     next_task_id++;
     return pd;

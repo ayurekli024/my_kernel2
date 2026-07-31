@@ -543,9 +543,22 @@ int api_exec_app(const char* name, const char* args) {
 
     extern unsigned char elf_load_buffer[];
     int file_size = ardaos_read_file(fat_name, ext, elf_load_buffer);
+    
     if (file_size > 0) {
-        // MALLOC İPTAL! Doğrudan statik elf_load_buffer kullanıyoruz (Çünkü CR3 haritasında yeri garanti)
-        int pid = create_task((void (*)())elf_load_buffer, (unsigned int)elf_load_buffer, (char*)args);
+        extern void* malloc(unsigned int);
+        // 1. ZIRH: Page-Alignment (Sayfa Hizalaması) için fazladan 4KB bellek al
+        unsigned char* raw_mem = (unsigned char*)malloc(65536 + 4096); 
+        
+        // 2. ZIRH: Adresi 4096 (4KB) katlarına kusursuzca sabitle
+        // (+ 4096 garantisi, raw_mem'in üzerine binmemizi engeller)
+        unsigned char* app_memory = (unsigned char*)(((unsigned int)raw_mem + 4096) & 0xFFFFF000);
+        
+        // 3. ZIRH: Cellat motoru bulabilsin diye, orijinal bellek adresini uygulamanın 4 bayt gerisine göm!
+        *((unsigned int*)(app_memory - 4)) = (unsigned int)raw_mem;
+
+        for (int k = 0; k < 65536; k++) app_memory[k] = 0; // RAM'i temizle
+        
+        int pid = create_task((void (*)())elf_load_buffer, (unsigned int)app_memory, (char*)args);
         return pid;
     }
     return -1;

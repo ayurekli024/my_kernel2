@@ -6,10 +6,11 @@ task_t* ready_queue;
 int next_pid = 1;
 extern void set_kernel_stack(unsigned int stack);
 // ELF motorunun varlığından derleyiciye önceden haber veriyoruz
-unsigned int load_elf_segments(unsigned char* elf_data);
+unsigned int load_elf_segments(unsigned char* elf_data, unsigned int* page_dir, unsigned char* phys_base);
 void update_tss_esp0() {
     if (current_task != 0) {
-        set_kernel_stack(current_task->stack_base + 4096);
+        // YENİ: Kernel Stack alanı 8KB'ın en tepesine çekildi
+        set_kernel_stack(current_task->stack_base + 8192);
     }
 }
 void init_tasking() {
@@ -39,9 +40,12 @@ int create_task(void (*func)(void), unsigned int app_base, char* args) {
     new_task->cpu_ticks = 0;
     new_task->cpu_usage = 0;
     new_task->state = 0; // Yeni görev varsayılan olarak "Çalışabilir" başlar
-    unsigned int* stack = (unsigned int*)malloc(4096);
+    // YENİ ZIRH: Stack boyutu 4KB'dan 8KB'a çıkarıldı! 
+    unsigned int* stack = (unsigned int*)malloc(8192);
     new_task->stack_base = (unsigned int)stack;
-    unsigned int stack_top_addr = (unsigned int)stack + 4096; 
+    
+    // Stack'in en tepesi artık 8192
+    unsigned int stack_top_addr = (unsigned int)stack + 8192;
     
     // =========================================================
     // 1. ARGÜMANI YIĞINA (STACK) GİZLİCE KOPYALA
@@ -68,29 +72,24 @@ int create_task(void (*func)(void), unsigned int app_base, char* args) {
     extern unsigned int page_directory[1024];
     if (is_user) {
         new_task->cr3 = (unsigned int)create_task_page_dir();
-        // --- ELF YÜKLEYİCİ İÇİN KESİNTİSİZ VE GÜVENLİ CR3 GEÇİŞİ ---
         unsigned int kernel_cr3;
         
-        // ZIRH: Saat kesmesi (Timer) araya girip CR3'ü bozmasın diye durduruyoruz!
         __asm__ __volatile__("cli"); 
-        
-        // YENI: "memory" clobber'i eklenerek GCC'nin kodlarin sirasini bozmasi engellendi
         __asm__ __volatile__("mov %%cr3, %0" : "=r"(kernel_cr3) : : "memory"); 
         __asm__ __volatile__("mov %0, %%cr3" : : "r"(new_task->cr3) : "memory");
 
         unsigned int actual_entry_point = (unsigned int)func;
-        unsigned int elf_entry = load_elf_segments((unsigned char*)app_base);
+        
+        // YENİ: Akıllı Yükleyici Çağrısı! (Ham Veri, Uygulamanın CR3 Haritası, Fiziksel RAM)
+        unsigned int elf_entry = load_elf_segments((unsigned char*)func, (unsigned int*)new_task->cr3, (unsigned char*)app_base);
         if (elf_entry != 0) {
             actual_entry_point = elf_entry; 
         }
 
         __asm__ __volatile__("mov %0, %%cr3" : : "r"(kernel_cr3)); 
+        __asm__ __volatile__("sti");
         
-        // TEHLİKE GEÇTİ: Kesmeleri (Multitasking) tekrar başlat!
-        __asm__ __volatile__("sti"); 
-        // -----------------------------------------------------------
-        
-        unsigned int* user_stack_top = (unsigned int*)(new_task->stack_base + 3072);
+        unsigned int* user_stack_top = (unsigned int*)(new_task->stack_base + 4096);
         *(--user_stack_top) = (unsigned int)target_args;
         *(--user_stack_top) = 0x00000000;
 
@@ -163,14 +162,19 @@ void kill_task_by_id(int task_id) {
             }
             curr->next = target->next; 
             
-            if (target->stack_base != 0) free((void*)target->stack_base);
-            
-            // KİLİT ZIRH: Eğer app_base statik elf_load_buffer ise, KESİNLİKLE FREE YAPMA!
-            extern unsigned char elf_load_buffer[];
-            if (target->id >= 2 && target->app_base != 0 && target->app_base != (unsigned int)elf_load_buffer) {
-                free((void*)target->app_base);
+            if (target->stack_base != 0) {
+                extern void free(void*);
+                free((void*)target->stack_base);
             }
             
+            if (target->id >= 2 && target->app_base != 0) {
+                extern void free(void*);
+                // KUSURSUZ CELLAT: Hizalanmış bellekten 4 bayt geriye bakarak orijinal adresi bul ve onu sil!
+                unsigned int original_ptr = *((unsigned int*)(target->app_base - 4));
+                free((void*)original_ptr);
+            }
+            
+            extern void free(void*);
             free(target);
             return; 
         }
@@ -178,21 +182,54 @@ void kill_task_by_id(int task_id) {
     } while (curr != ready_queue);
 }
 
-// ORİJİNAL ELF YÜKLEYİCİ: Uygulamayı kendi CR3 sanal haritasına (0x400000) güvenle kopyalar
-unsigned int load_elf_segments(unsigned char* elf_data) {
-    elf32_ehdr_t* header = (elf32_ehdr_t*)elf_data;
-    if (header->e_ident[0] != 0x7F || header->e_ident[1] != 'E' || 
-        header->e_ident[2] != 'L' || header->e_ident[3] != 'F') {
-        return 0; 
+// =========================================================================
+// 1. ZIRH: SANAL BELLEK YÖNLENDİRİCİSİ (Virtual to Physical Memory Mapper)
+// =========================================================================
+void map_vaddr_to_paddr(unsigned int* page_dir, unsigned int vaddr, unsigned int paddr) {
+    unsigned int pdindex = vaddr >> 22;
+    unsigned int ptindex = (vaddr >> 12) & 0x03FF;
+    
+    unsigned int* pt;
+    if ((page_dir[pdindex] & 1) == 0) { // Page Table (Sayfa Tablosu) yoksa yarat
+        
+        // KUSURSUZ ZIRH: Malloc kullanılamaz çünkü MMU 4096 katları ister!
+        extern void* alloc_page_aligned(void);
+        pt = (unsigned int*)alloc_page_aligned();
+        
+        for(int i = 0; i < 1024; i++) pt[i] = 0;
+        page_dir[pdindex] = ((unsigned int)pt) | 7; // Present, R/W, User
+    } else {
+        pt = (unsigned int*)(page_dir[pdindex] & 0xFFFFF000);
     }
+    pt[ptindex] = (paddr & 0xFFFFF000) | 7; // Present, R/W, User
+}
+
+// =========================================================================
+// 2. ZIRH: AKILLI ELF YÜKLEYİCİ (Fiziksel RAM'e yazar, Sanal RAM'e bağlar)
+// =========================================================================
+unsigned int load_elf_segments(unsigned char* elf_data, unsigned int* page_dir, unsigned char* phys_base) {
+    elf32_ehdr_t* header = (elf32_ehdr_t*)elf_data;
+    if (header->e_ident[0] != 0x7F) return 0; // ELF değilse çık
     
     elf32_phdr_t* phdr = (elf32_phdr_t*)(elf_data + header->e_phoff);
     for (int i = 0; i < header->e_phnum; i++) {
-        if (phdr[i].p_type == 1) { 
-            unsigned char* dest = (unsigned char*)phdr[i].p_vaddr;
-            unsigned char* src = elf_data + phdr[i].p_offset;
-            for (unsigned int j = 0; j < phdr[i].p_filesz; j++) dest[j] = src[j];
-            for (unsigned int j = phdr[i].p_filesz; j < phdr[i].p_memsz; j++) dest[j] = 0;
+        if (phdr[i].p_type == 1) { // PT_LOAD (Yüklenebilir Segment)
+            unsigned int vaddr = phdr[i].p_vaddr;
+            unsigned int memsz = phdr[i].p_memsz;
+            unsigned int filesz = phdr[i].p_filesz;
+            unsigned int offset = phdr[i].p_offset;
+            
+            // A) Fiziksel RAM'e (malloc ile alınan yere) kopyala
+            unsigned char* dest = phys_base + offset;
+            unsigned char* src = elf_data + offset;
+            for (unsigned int j = 0; j < filesz; j++) dest[j] = src[j];
+            for (unsigned int j = filesz; j < memsz; j++) dest[j] = 0;
+            
+            // B) MMU İLLÜZYONU: Fiziksel RAM'i, uygulamanın beklediği Sanal Adrese (vaddr) bağla!
+            unsigned int pages = (memsz / 4096) + 1;
+            for (unsigned int p = 0; p < pages; p++) {
+                map_vaddr_to_paddr(page_dir, vaddr + (p * 4096), (unsigned int)(phys_base + offset + (p * 4096)));
+            }
         }
     }
     return header->e_entry; 

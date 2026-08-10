@@ -207,6 +207,9 @@ void map_vaddr_to_paddr(unsigned int* page_dir, unsigned int vaddr, unsigned int
 // =========================================================================
 // 2. ZIRH: AKILLI ELF YÜKLEYİCİ (Fiziksel RAM'e yazar, Sanal RAM'e bağlar)
 // =========================================================================
+// =========================================================================
+// KUSURSUZ AKILLI ELF YÜKLEYİCİ (Doğru Segment & Sayfa Eşleme)
+// =========================================================================
 unsigned int load_elf_segments(unsigned char* elf_data, unsigned int* page_dir, unsigned char* phys_base) {
     elf32_ehdr_t* header = (elf32_ehdr_t*)elf_data;
     if (header->e_ident[0] != 0x7F) return 0; // ELF değilse çık
@@ -219,16 +222,19 @@ unsigned int load_elf_segments(unsigned char* elf_data, unsigned int* page_dir, 
             unsigned int filesz = phdr[i].p_filesz;
             unsigned int offset = phdr[i].p_offset;
             
-            // A) Fiziksel RAM'e (malloc ile alınan yere) kopyala
-            unsigned char* dest = phys_base + offset;
+            // 1. Segment verisini fiziksel RAM'e doğru konuma kopyala
+            unsigned char* dest = phys_base + (vaddr & 0xFFF);
             unsigned char* src = elf_data + offset;
             for (unsigned int j = 0; j < filesz; j++) dest[j] = src[j];
             for (unsigned int j = filesz; j < memsz; j++) dest[j] = 0;
             
-            // B) MMU İLLÜZYONU: Fiziksel RAM'i, uygulamanın beklediği Sanal Adrese (vaddr) bağla!
-            unsigned int pages = (memsz / 4096) + 1;
-            for (unsigned int p = 0; p < pages; p++) {
-                map_vaddr_to_paddr(page_dir, vaddr + (p * 4096), (unsigned int)(phys_base + offset + (p * 4096)));
+            // 2. MMU İLLÜZYONU: Fiziksel RAM sayfalarını uygulamanın beklediği Sanal Adrese bağla!
+            unsigned int page_start = vaddr & 0xFFFFF000;
+            unsigned int page_end = (vaddr + memsz + 4095) & 0xFFFFF000;
+            for (unsigned int cur_v = page_start; cur_v < page_end; cur_v += 4096) {
+                unsigned int diff = cur_v - page_start;
+                unsigned int paddr = (unsigned int)phys_base + diff;
+                map_vaddr_to_paddr(page_dir, cur_v, paddr);
             }
         }
     }

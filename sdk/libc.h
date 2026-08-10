@@ -15,4 +15,6 @@ void printf(const char* format, ...);
 // Dinamik Bellek Yönetimi
 void* malloc(unsigned int size);
 void free(void* ptr);
+void get_screen_info(unsigned int** fb, int* w, int* h);
+void get_mouse_state(int* x, int* y, int* btn);
 #endif

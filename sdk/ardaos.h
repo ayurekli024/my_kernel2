@@ -1,5 +1,57 @@
 #ifndef ARDAOS_H
 #define ARDAOS_H
+
+#define MAX_WINDOWS 6
+#define MAX_SHAPES_PER_WIN 100
+#define MAX_DESKTOP_SHAPES 50
+#define TERMINAL_MAX_LINES 16
+#define TERMINAL_LINE_LEN 80
+
+typedef struct {
+    int id;
+    int x, y, w, h;
+    int is_open;
+    int is_dragging;
+    char title[32];
+    int owner_task_id;
+    int shape_count;
+    int shape_x[MAX_SHAPES_PER_WIN]; int shape_y[MAX_SHAPES_PER_WIN];
+    int shape_w[MAX_SHAPES_PER_WIN]; int shape_h[MAX_SHAPES_PER_WIN];
+    unsigned int shape_color[MAX_SHAPES_PER_WIN];
+    int is_minimized;
+    int prev_x, prev_y, prev_w, prev_h;
+    char text_content[1024];
+} window_t;
+
+// YENİ: Çekirdek ve WM.ELF'in ortak kullandığı devasa köprü!
+typedef struct {
+    window_t windows[MAX_WINDOWS];
+    
+    int desktop_shape_count;
+    int desktop_shape_x[MAX_DESKTOP_SHAPES]; int desktop_shape_y[MAX_DESKTOP_SHAPES];
+    int desktop_shape_w[MAX_DESKTOP_SHAPES]; int desktop_shape_h[MAX_DESKTOP_SHAPES];
+    unsigned int desktop_shape_color[MAX_DESKTOP_SHAPES];
+    
+    int focused_window;
+    int any_window_dragging;
+    volatile int force_redraw;
+    
+    int context_menu_open;
+    int context_menu_hover_idx;
+    
+    char terminal_lines[TERMINAL_MAX_LINES][TERMINAL_LINE_LEN];
+    int terminal_line_count;
+    char user_input[256];
+    int input_idx;
+    
+    unsigned int current_bg_color;
+    
+    // Sistem Monitörü verileri Çekirdekten -> WM'e akar
+    int sys_pid[32];
+    int sys_state[32]; 
+    int sys_cpu[32];
+    int sys_task_count;
+} gui_state_t;
 static inline void sys_yield() {
     __asm__ __volatile__ ("int $129");
 }
@@ -97,5 +149,14 @@ static inline void sys_system_action(int action_id, char* buffer) {
 }
 static inline void sys_set_window_text(const char* text) {
     __asm__ __volatile__ ("int $0x80" : : "a"(30), "b"((unsigned int)text));
+}
+static inline void sys_get_screen(unsigned int** fb, int* w, int* h) {
+    __asm__ __volatile__ ("int $0x80" : : "a"(31), "b"(fb), "c"(w), "d"(h));
+}
+static inline void sys_get_mouse(int* x, int* y, int* btn) {
+    __asm__ __volatile__ ("int $0x80" : : "a"(32), "b"(x), "c"(y), "d"(btn));
+}
+static inline void sys_get_time(int* h, int* m) {
+    __asm__ __volatile__ ("int $0x80" : : "a"(33), "b"(h), "c"(m));
 }
 #endif

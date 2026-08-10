@@ -46,7 +46,11 @@ void mark_screen_dirty() {
 
 void init_graphics(unsigned int* fb, int width, int height) {
     framebuffer = fb; screen_width = width; screen_height = height;
-    back_buffer = (unsigned int*)malloc(width * height * sizeof(unsigned int));
+    
+    // BÜYÜK ÇÖZÜM: Çekirdeğin kendine ait 3MB'lık bir tampon bellek ayırmasını İPTAL EDİYORUZ!
+    // Mavi ekran gerekirse doğrudan çizilecek. Tüm Heap hafızasını Masaüstü Yöneticisine (wm.elf) saklıyoruz.
+    back_buffer = 0; 
+    
     reset_clipping_rect(); mark_screen_dirty();
 }
 

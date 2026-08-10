@@ -2,7 +2,7 @@
 #include "io.h"
 #include "graphics.h" // En üste eklemeyi unutma!
 #include "task.h"
-
+#include "../sdk/ardaos.h" 
 struct IDT_entry {
     unsigned short offset_lowerbits; unsigned short selector;
     unsigned char zero; unsigned char type_attr; unsigned short offset_higherbits;
@@ -358,7 +358,7 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         ardaos_list_files(real_buf);
         return 1;
     }
-    // API No 29: sys_system_action (Donanım ve Çekirdek Kısayolları Motoru)
+    // API No 29: Donanım ve Çekirdek Kısayolları Motoru
     else if (sys_num == 29) {
         unsigned int base = current_task->app_base;
         char* real_buf = (unsigned int)arg2 < 0x100000 ? (char*)(base + arg2) : (char*)arg2;
@@ -376,8 +376,13 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
             if (arp_resolved == 0) { extern void rtl8139_send_arp(void); rtl8139_send_arp(); }
             else { extern void rtl8139_send_ping(void); rtl8139_send_ping(); }
         }
-        else if (arg1 == 4) { extern unsigned int current_bg_color; extern volatile int force_redraw; current_bg_color = 0x000000AA; force_redraw = 1; }
-        else if (arg1 == 5) { extern unsigned int current_bg_color; extern volatile int force_redraw; current_bg_color = 0x00AA0000; force_redraw = 1; }
+        // YENİ ZIRH: Arka plan rengini değiştirmek için artık gui yapısını (Shared Memory) kullanıyoruz!
+        else if (arg1 == 4 || arg1 == 5) {
+            extern gui_state_t* gui;
+            if (arg1 == 4) gui->current_bg_color = 0x000000AA;
+            else if (arg1 == 5) gui->current_bg_color = 0x00AA0000;
+            gui->force_redraw = 1;
+        }
         else if (arg1 == 6) { // SAAT
             extern unsigned char bcd_to_bin(unsigned char); extern unsigned char get_rtc_register(int);
             unsigned char h = bcd_to_bin(get_rtc_register(0x04)); h = (h + 3) % 24;
@@ -394,7 +399,7 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         else if (arg1 == 8) { // RAM
             extern unsigned int total_used_memory; extern void itoa(int, char*); extern void strcpy(char*, const char*); extern void strcat(char*, const char*);
             char mem_str[16]; itoa(total_used_memory, mem_str);
-            strcpy(real_buf, "Kullanilan RAM: "); strcat(real_buf, mem_str); strcat(real_buf, " / 5242880 Bayt (5 MB)");
+            strcpy(real_buf, "Kullanilan RAM: "); strcat(real_buf, mem_str); strcat(real_buf, " / 4194304 Bayt (4 MB)");
         }
         return 1;
     }
@@ -404,6 +409,38 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         const char* real_text = (unsigned int)arg1 < 0x100000 ? (const char*)(base + arg1) : (const char*)arg1;
         extern void api_set_window_text(const char*);
         api_set_window_text(real_text);
+        return 1;
+    }
+    // API No 31: Ekran Kartı (Framebuffer) Erişim Köprüsü
+    else if (sys_num == 31) {
+        extern unsigned int* vesa_framebuffer;
+        unsigned int** fb = (unsigned int**)arg1;
+        int* w = (int*)arg2;
+        int* h = (int*)arg3;
+        *fb = vesa_framebuffer;
+        *w = 1024;
+        *h = 768;
+        return 1;
+    }
+    // API No 32: Raw (Ham) Fare Verisi
+    else if (sys_num == 32) {
+        extern int mouse_x, mouse_y, mouse_left_button;
+        int* mx = (int*)arg1;
+        int* my = (int*)arg2;
+        int* btn = (int*)arg3;
+        *mx = mouse_x; *my = mouse_y; *btn = mouse_left_button;
+        return 1;
+    }
+    // API No 33: Masaüstü Yöneticisi (WM) için Canlı Saat Köprüsü
+    else if (sys_num == 33) {
+        extern unsigned char get_rtc_register(int);
+        extern unsigned char bcd_to_bin(unsigned char);
+        unsigned char h = bcd_to_bin(get_rtc_register(0x04));
+        unsigned char m = bcd_to_bin(get_rtc_register(0x02));
+        h = (h + 3) % 24; // GMT+3 Türkiye Saati
+        int* hr = (int*)arg1;
+        int* mn = (int*)arg2;
+        *hr = h; *mn = m;
         return 1;
     }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür

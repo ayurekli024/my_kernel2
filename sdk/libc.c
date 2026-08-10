@@ -115,3 +115,9 @@ void* malloc(unsigned int size) {
 void free(void* ptr) {
     sys_free(ptr);
 }
+void get_screen_info(unsigned int** fb, int* w, int* h) {
+    sys_get_screen(fb, w, h);
+}
+void get_mouse_state(int* x, int* y, int* btn) {
+    sys_get_mouse(x, y, btn);
+}

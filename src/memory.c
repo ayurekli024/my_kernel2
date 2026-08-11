@@ -213,3 +213,14 @@ unsigned int* create_task_page_dir() {
     next_task_id++;
     return pd;
 }
+// ============================================================================
+// YENİ: UYGULAMALAR İÇİN SINIRSIZ FİZİKSEL HAFIZA HAVUZU (16. MB'DAN BAŞLAR)
+// ============================================================================
+// 16 MB (0x1000000) sınırı: Kernel, DMA ve Ortak Hafıza'nın (GUI) tamamen bittiği yer!
+unsigned int user_phys_memory = 0x1000000; 
+
+void* alloc_user_page() {
+    void* ptr = (void*)user_phys_memory;
+    user_phys_memory += 4096; // Her istekte 4KB (1 Sayfa) ver
+    return ptr;
+}

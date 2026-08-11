@@ -40,6 +40,8 @@ int create_task(void (*func)(void), unsigned int app_base, char* args) {
     new_task->cpu_ticks = 0;
     new_task->cpu_usage = 0;
     new_task->state = 0; // Yeni görev varsayılan olarak "Çalışabilir" başlar
+    // YENİ: Dinamik hafıza (Heap) tam 0x410000 adresinden başlayacak!
+    new_task->v_heap_end = 0x410000;
     // YENİ ZIRH: Stack boyutu 4KB'dan 8KB'a çıkarıldı! 
     unsigned int* stack = (unsigned int*)malloc(8192);
     new_task->stack_base = (unsigned int)stack;
@@ -279,4 +281,35 @@ void get_process_list(char* buffer) {
         
         curr = curr->next;
     } while (curr != ready_queue);
+} // <--- İŞTE BU PARANTEZ ÇOK ÖNEMLİ! get_process_list BURADA BİTMELİ.
+
+// =========================================================================
+// 3. ZIRH: DİNAMİK UYGULAMA BELLEĞİ (sbrk - User Space Heap Genişletici)
+// =========================================================================
+unsigned int sys_sbrk(int increment) {
+    unsigned int old_break = current_task->v_heap_end;
+    if (increment == 0) return old_break;
+    
+    unsigned int new_break = old_break + increment;
+    
+    // Eğer istenilen bellek mevcut sayfa sınırını aşıyorsa yeni sayfalar haritala
+    unsigned int start_page = (old_break + 4095) & 0xFFFFF000;
+    unsigned int end_page = (new_break + 4095) & 0xFFFFF000;
+    
+    if (new_break > old_break) { 
+        for (unsigned int vaddr = start_page; vaddr < end_page; vaddr += 4096) {
+            
+            // KUSURSUZ ZIRH: Artık DMA belleğini değil, 16. MB'daki sınır ötesi güvenli alanı kullanıyoruz!
+            extern void* alloc_user_page(void);
+            unsigned int paddr = (unsigned int)alloc_user_page();
+            
+            // MMU İLLÜZYONU: Yeni fiziksel belleği uygulamanın özel Sanal Haritasına ekle
+            map_vaddr_to_paddr((unsigned int*)current_task->cr3, vaddr, paddr);
+        }
+        // İşlemcinin yeni sayfaları görmesi için TLB Flush (CR3 Yenileme)
+        __asm__ __volatile__("mov %0, %%cr3" : : "r"(current_task->cr3));
+    }
+    
+    current_task->v_heap_end = new_break;
+    return old_break; // Uygulamaya kullanabileceği güvenli başlangıç adresini döndür
 }

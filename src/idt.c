@@ -443,6 +443,11 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         *hr = h; *mn = m;
         return 1;
     }
+    // YENİ - API No 34: sys_sbrk (Uygulamalar için Dinamik Hafıza)
+    else if (sys_num == 34) {
+        extern unsigned int sys_sbrk(int);
+        return sys_sbrk((int)arg1);
+    }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
     return -1;
 }

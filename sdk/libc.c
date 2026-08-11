@@ -107,13 +107,67 @@ void printf(const char* format, ...) {
     sys_print(buffer); 
 }
 // Standart Kütüphane Malloc (Arka planda Kernel Syscall'unu çağırır)
-void* malloc(unsigned int size) {
-    return sys_malloc(size);
+// ========================================================
+// YENİ: USER-SPACE DİNAMİK BELLEK YÖNETİCİSİ (Kernel'den Bağımsız!)
+// ========================================================
+struct malloc_block {
+    unsigned int size;
+    int is_free;
+    struct malloc_block* next;
+};
+
+// Uygulamanın kendi dünyasındaki Heap Başlangıcı
+struct malloc_block* user_heap_head = 0;
+
+// Kernel'den Sayfa (Page) Genişletme İsteği
+void* sbrk(int increment) {
+    unsigned int ret;
+    __asm__ __volatile__ ("int $0x80" : "=a"(ret) : "a"(34), "b"(increment));
+    return (void*)ret;
 }
 
-// Standart Kütüphane Free (Arka planda Kernel Syscall'unu çağırır)
+// Tamamen İzole Uygulama İçi Malloc Motoru (Next-Fit Algoritması)
+void* malloc(unsigned int size) {
+    if (size == 0) return 0;
+    size = (size + 3) & ~3; // Hafızayı kusursuz çalışması için 4 bayta hizala
+
+    // İlk defa RAM isteniyorsa, Çekirdekten sbrk ile yeni harita talep et!
+    if (user_heap_head == 0) {
+        user_heap_head = (struct malloc_block*)sbrk(sizeof(struct malloc_block) + size);
+        user_heap_head->size = size;
+        user_heap_head->is_free = 0;
+        user_heap_head->next = 0;
+        return (void*)((unsigned int)user_heap_head + sizeof(struct malloc_block));
+    }
+
+    struct malloc_block* curr = user_heap_head;
+    struct malloc_block* last = curr;
+    
+    // Uygulama içinde daha önceden silinmiş (Free) boş bir delik var mı diye bak
+    while (curr != 0) {
+        if (curr->is_free && curr->size >= size) {
+            curr->is_free = 0;
+            return (void*)((unsigned int)curr + sizeof(struct malloc_block));
+        }
+        last = curr;
+        curr = curr->next;
+    }
+
+    // Uygulamanın elindeki RAM yetmediyse, Çekirdekten haritayı daha da büyütmesini iste!
+    struct malloc_block* new_block = (struct malloc_block*)sbrk(sizeof(struct malloc_block) + size);
+    new_block->size = size;
+    new_block->is_free = 0;
+    new_block->next = 0;
+    last->next = new_block;
+    
+    return (void*)((unsigned int)new_block + sizeof(struct malloc_block));
+}
+
 void free(void* ptr) {
-    sys_free(ptr);
+    if (!ptr) return;
+    // Göstericinin 1 adım gerisine gidip başlığı bul ve RAM'i tekrar serbest (Free) bırak
+    struct malloc_block* block = (struct malloc_block*)((unsigned int)ptr - sizeof(struct malloc_block));
+    block->is_free = 1;
 }
 void get_screen_info(unsigned int** fb, int* w, int* h) {
     sys_get_screen(fb, w, h);

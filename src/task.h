@@ -53,8 +53,9 @@ typedef struct task {
     unsigned int app_base;     
     struct task* next;  
     int state;   
-    unsigned int cpu_ticks; // YENİ: Anlık saniyedeki vuruş sayısı
+    unsigned int cpu_ticks; 
     unsigned int cpu_usage;
+    unsigned int v_heap_end; // YENİ: Uygulamanın Dinamik Sanal Hafıza Sınırı (sbrk için)
     file_obj_t fd_table[MAX_FD_PER_TASK];
 } task_t;
 

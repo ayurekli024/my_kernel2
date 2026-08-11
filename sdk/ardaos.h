@@ -159,4 +159,10 @@ static inline void sys_get_mouse(int* x, int* y, int* btn) {
 static inline void sys_get_time(int* h, int* m) {
     __asm__ __volatile__ ("int $0x80" : : "a"(33), "b"(h), "c"(m));
 }
+static inline int sys_get_window_pos(int win_id, int* x, int* y, int* w, int* h) {
+    int ret;
+    // DİKKAT: arg5 için %edi (D) yazmacı kullanılır.
+    __asm__ __volatile__ ("int $0x80" : "=a"(ret) : "a"(35), "b"(win_id), "c"(x), "d"(y), "S"(w), "D"(h));
+    return ret;
+}
 #endif

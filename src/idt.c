@@ -448,6 +448,25 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         extern unsigned int sys_sbrk(int);
         return sys_sbrk((int)arg1);
     }
+    // YENİ - API No 35: sys_get_window_pos (Uygulamanın Ekrandaki Yerini Bulur)
+    else if (sys_num == 35) {
+        extern gui_state_t* gui;
+        int win_id = (int)arg1;
+        unsigned int base = current_task->app_base;
+        int* px = (unsigned int)arg2 < 0x100000 ? (int*)(base + arg2) : (int*)arg2;
+        int* py = (unsigned int)arg3 < 0x100000 ? (int*)(base + arg3) : (int*)arg3;
+        int* pw = (unsigned int)arg4 < 0x100000 ? (int*)(base + arg4) : (int*)arg4;
+        int* ph = (unsigned int)arg5 < 0x100000 ? (int*)(base + arg5) : (int*)arg5;
+        
+        if (win_id >= 0 && win_id < MAX_WINDOWS && gui->windows[win_id].is_open) {
+            *px = gui->windows[win_id].x;
+            *py = gui->windows[win_id].y;
+            *pw = gui->windows[win_id].w;
+            *ph = gui->windows[win_id].h;
+            return 1;
+        }
+        return 0;
+    }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
     return -1;
 }

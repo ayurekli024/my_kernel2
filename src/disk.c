@@ -338,7 +338,7 @@ int vfs_open(const char* filename, const char* ext) {
         return free_fd;
     }
     // YENİ: Ağ Soketi Açma (UNIX Felsefesi)
-    if (strncmp(filename, "NET", 3) == 0 && strncmp(ext, "UDP", 3) == 0) {
+    if (strncmp(filename, "NET", 3) == 0 && strncmp(ext, "UDP", 3) == 0) {  
         current_task->fd_table[free_fd].is_open = 1;
         current_task->fd_table[free_fd].type = 2; // 2 = Ağ Soketi
         current_task->fd_table[free_fd].size = 0xFFFFFFFF; 
@@ -355,17 +355,21 @@ int vfs_open(const char* filename, const char* ext) {
         
         return free_fd;
     }
-    // YENİ: TCP Ağ Soketi (Örnek Olarak "example.com" Sunucusuna Sabitlendi)
+    // YENİ: TCP Ağ Soketi
     if (strncmp(filename, "NET", 3) == 0 && strncmp(ext, "TCP", 3) == 0) {
         current_task->fd_table[free_fd].is_open = 1;
         current_task->fd_table[free_fd].type = 3; // 3 = TCP Ağ Soketi
         
         extern unsigned char tcp_dest_ip[];
         extern int tcp_state;
+        extern unsigned short tcp_local_port;
         extern void rtl8139_send_tcp(unsigned char, unsigned char*, int);
         
-        // Dünyanın en standart test sunucusu olan example.com IP'si (93.184.216.34)
-        // Dünyanın en sağlam sunucusu: Google (142.250.187.46)
+        // QEMU'nun hayalet bağlantı tuzağını aşmak için portu sürekli değiştiriyoruz!
+        tcp_local_port++; 
+        
+        // BÜYÜK GERİ DÖNÜŞ: Google'ın IP'sine (142.250.187.46) dönüyoruz.
+        // Google, MSS Option olmayan çıplak TCP paketlerimizi kabul eden nadir devlerdendir!
         tcp_dest_ip[0] = 142; tcp_dest_ip[1] = 250; tcp_dest_ip[2] = 187; tcp_dest_ip[3] = 46;
         tcp_state = 1; // SYN_SENT durumuna geç
         

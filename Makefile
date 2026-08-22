@@ -83,9 +83,12 @@ wm.elf: sdk/wm.c sdk/libc.o
 explorer.elf: sdk/explorer.c sdk/libc.o
 	$(CC) $(APP_CFLAGS) -c sdk/explorer.c -o sdk/explorer.o
 	ld -m elf_i386 -T sdk/app.ld sdk/explorer.o sdk/libc.o -o explorer.elf
+tarayici.elf: sdk/tarayici.c sdk/libc.o
+	$(CC) $(APP_CFLAGS) -c sdk/tarayici.c -o sdk/tarayici.o
+	ld -m elf_i386 -T sdk/app.ld sdk/tarayici.o sdk/libc.o -o tarayici.elf
 
 # 4. Aşama: Uygulamaları FAT16 Diske (c.img) Enjekte Etme
-disk: yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf edit.elf wm.elf explorer.elf
+disk: yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf edit.elf wm.elf explorer.elf tarayici.elf
 	mcopy -o -i c.img yilan.elf ::/YILAN.ELF
 	mcopy -o -i c.img okuyucu.elf ::/OKUYUCU.ELF
 	mcopy -o -i c.img bomba.elf ::/BOMBA.ELF
@@ -96,6 +99,7 @@ disk: yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf
 	mcopy -o -i c.img edit.elf ::/EDIT.ELF
 	mcopy -o -i c.img wm.elf ::/WM.ELF
 	mcopy -o -i c.img explorer.elf ::/EXPLORER.ELF
+	mcopy -o -i c.img tarayici.elf ::/TARAYICI.ELF
 
 # 5. Aşama: QEMU'yu başlat (Başlamadan önce ISO ve disk otomatik güncellenir)
 run: $(ISO_TARGET) disk
@@ -103,5 +107,5 @@ run: $(ISO_TARGET) disk
 
 # Temizlik
 clean:
-	rm -f src/*.o sdk/*.o $(TARGET) $(ISO_TARGET) yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf edit.elf wm.elf explorer.elf
+	rm -f src/*.o sdk/*.o $(TARGET) $(ISO_TARGET) yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf edit.elf wm.elf explorer.elf tarayici.elf
 	rm -rf isodir

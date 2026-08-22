@@ -320,78 +320,52 @@ int vfs_open(const char* filename, const char* ext) {
     
     int free_fd = -1;
     for (int i = 0; i < MAX_FD_PER_TASK; i++) {
-        if (current_task->fd_table[i].is_open == 0) {
-            free_fd = i; break;
-        }
+        if (current_task->fd_table[i].is_open == 0) { free_fd = i; break; }
     }
     if (free_fd == -1) return -1;
 
-    // ==========================================
-    // YENİ: SANAL DONANIM (DEVICE) KONTROLÜ
-    // ==========================================
-    // Eğer açılmak istenen dosya "DEV.KBD" (Keyboard Device) ise diske gitme!
     if (strncmp(filename, "DEV", 3) == 0 && strncmp(ext, "KBD", 3) == 0) {
-        current_task->fd_table[free_fd].is_open = 1;
-        current_task->fd_table[free_fd].type = 1; // 1 = Sanal Cihaz (Klavye)
-        current_task->fd_table[free_fd].size = 0xFFFFFFFF; // Klavye akışının sonu yoktur!
-        current_task->fd_table[free_fd].offset = 0;
+        current_task->fd_table[free_fd].is_open = 1; current_task->fd_table[free_fd].type = 1;
+        current_task->fd_table[free_fd].size = 0xFFFFFFFF; current_task->fd_table[free_fd].offset = 0;
         return free_fd;
     }
-    // YENİ: Ağ Soketi Açma (UNIX Felsefesi)
-    if (strncmp(filename, "NET", 3) == 0 && strncmp(ext, "UDP", 3) == 0) {  
-        current_task->fd_table[free_fd].is_open = 1;
-        current_task->fd_table[free_fd].type = 2; // 2 = Ağ Soketi
-        current_task->fd_table[free_fd].size = 0xFFFFFFFF; 
-        current_task->fd_table[free_fd].offset = 0;
-        
-        // Muazzam Bir Hack: QEMU'nun dâhili DNS Sunucusuna (10.0.2.3:53) bağlanıyoruz.
-        // Oraya rastgele metin yolladığımızda bize kızıp "Format Hatası" diye geri UDP yollayacak!
-        current_task->fd_table[free_fd].target_ip[0] = 10;
-        current_task->fd_table[free_fd].target_ip[1] = 0;
-        current_task->fd_table[free_fd].target_ip[2] = 2;
-        current_task->fd_table[free_fd].target_ip[3] = 3;
-        current_task->fd_table[free_fd].target_port = 53; // DNS Portu
-        current_task->fd_table[free_fd].local_port = 5555;
-        
+    if (strncmp(filename, "NET", 3) == 0 && strncmp(ext, "UDP", 3) == 0) {
+        current_task->fd_table[free_fd].is_open = 1; current_task->fd_table[free_fd].type = 2;
+        current_task->fd_table[free_fd].size = 0xFFFFFFFF; current_task->fd_table[free_fd].offset = 0;
+        current_task->fd_table[free_fd].target_ip[0] = 10; current_task->fd_table[free_fd].target_ip[1] = 0;
+        current_task->fd_table[free_fd].target_ip[2] = 2; current_task->fd_table[free_fd].target_ip[3] = 3;
+        current_task->fd_table[free_fd].target_port = 53; current_task->fd_table[free_fd].local_port = 5555;
         return free_fd;
     }
-    // YENİ: TCP Ağ Soketi
     if (strncmp(filename, "NET", 3) == 0 && strncmp(ext, "TCP", 3) == 0) {
-        current_task->fd_table[free_fd].is_open = 1;
-        current_task->fd_table[free_fd].type = 3; // 3 = TCP Ağ Soketi
-        
-        extern unsigned char tcp_dest_ip[];
-        extern int tcp_state;
-        extern unsigned short tcp_local_port;
+        current_task->fd_table[free_fd].is_open = 1; current_task->fd_table[free_fd].type = 3;
+        extern unsigned char tcp_dest_ip[]; extern int tcp_state; extern unsigned short tcp_local_port;
         extern void rtl8139_send_tcp(unsigned char, unsigned char*, int);
-        
-        // QEMU'nun hayalet bağlantı tuzağını aşmak için portu sürekli değiştiriyoruz!
         tcp_local_port++; 
-        
-        // BÜYÜK GERİ DÖNÜŞ: Google'ın IP'sine (142.250.187.46) dönüyoruz.
-        // Google, MSS Option olmayan çıplak TCP paketlerimizi kabul eden nadir devlerdendir!
         tcp_dest_ip[0] = 142; tcp_dest_ip[1] = 250; tcp_dest_ip[2] = 187; tcp_dest_ip[3] = 46;
-        tcp_state = 1; // SYN_SENT durumuna geç
-        
-        rtl8139_send_tcp(0x02, 0, 0); // Karşı sunucuya SYN (Merhaba) Paketi fırlat!
+        tcp_state = 1; rtl8139_send_tcp(0x02, 0, 0); 
         return free_fd;
     }
 
-    // Klasik FAT16 dizin arama kodu
-    directory_entry_t root_dir[16]; 
-    ata_lba_read(root_dir_start_lba, 1, (unsigned short*)root_dir);
-    for (int i = 0; i < 16; i++) {
-        if (root_dir[i].name[0] == 0 || root_dir[i].name[0] == (char)0xE5) continue; 
-        if (strncmp(root_dir[i].name, filename, 8) == 0 && strncmp(root_dir[i].ext, ext, 3) == 0) {
-            current_task->fd_table[free_fd].is_open = 1;
-            current_task->fd_table[free_fd].type = 0; // 0 = Normal Disk Dosyası
-            current_task->fd_table[free_fd].size = root_dir[i].size;
-            current_task->fd_table[free_fd].offset = 0;
-            current_task->fd_table[free_fd].cluster = root_dir[i].cluster;
-            current_task->fd_table[free_fd].lba_start = data_start_lba + ((root_dir[i].cluster - 2) * bpb.sectors_per_cluster);
-            return free_fd;
+    // YENİ ZIRH: Artık sadece ilk 16 dosyayı değil, 32 sektörlük (512 dosyalık) tüm Root Dizinini tarıyoruz!
+    for (unsigned int s = 0; s < 32; s++) {
+        directory_entry_t root_dir[16]; 
+        ata_lba_read(root_dir_start_lba + s, 1, (unsigned short*)root_dir);
+        for (int i = 0; i < 16; i++) {
+            if (root_dir[i].name[0] == 0) goto not_found; // Dizin tamamen bitti
+            if (root_dir[i].name[0] == (char)0xE5) continue; 
+            if (strncmp(root_dir[i].name, filename, 8) == 0 && strncmp(root_dir[i].ext, ext, 3) == 0) {
+                current_task->fd_table[free_fd].is_open = 1;
+                current_task->fd_table[free_fd].type = 0; 
+                current_task->fd_table[free_fd].size = root_dir[i].size;
+                current_task->fd_table[free_fd].offset = 0;
+                current_task->fd_table[free_fd].cluster = root_dir[i].cluster;
+                current_task->fd_table[free_fd].lba_start = data_start_lba + ((root_dir[i].cluster - 2) * bpb.sectors_per_cluster);
+                return free_fd;
+            }
         }
     }
+not_found:
     return -1; 
 }
 
@@ -402,58 +376,50 @@ int vfs_read(int fd, unsigned char* target_buffer, int count) {
 
     file_obj_t* file = &current_task->fd_table[fd];
     
-    // ==========================================
-    // YENİ: EĞER BU BİR SANAL KLAVYE İSE
-    // ==========================================
     if (file->type == 1) {
         extern int kernel_read_keyboard(unsigned char* buffer);
         return kernel_read_keyboard(target_buffer); 
     }
-    // YENİ: Soketten Veri Okuma
     if (file->type == 2) {
-        extern int udp_inbox_ready;
-        extern int udp_inbox_size;
-        extern unsigned char udp_inbox[];
-        
+        extern int udp_inbox_ready; extern int udp_inbox_size; extern unsigned char udp_inbox[];
         if (udp_inbox_ready) {
             int to_copy = count < udp_inbox_size ? count : udp_inbox_size;
             for(int i = 0; i < to_copy; i++) target_buffer[i] = udp_inbox[i];
-            target_buffer[to_copy] = '\0';
-            udp_inbox_ready = 0; // Okuduk, kutuyu boşalt
+            target_buffer[to_copy] = '\0'; udp_inbox_ready = 0; 
             return to_copy;
         }
-        
         return 0;
     }
-    // YENİ: TCP Soketinden Veri Okuma
     if (file->type == 3) {
-        extern int tcp_inbox_ready;
-        extern int tcp_inbox_size;
-        extern unsigned char tcp_inbox[];
-        extern int tcp_state;
-        
-        if (tcp_state != 2) return 0; // El sıkışma bitmediyse bekle
-        
+        extern int tcp_inbox_ready; extern int tcp_inbox_size; extern unsigned char tcp_inbox[]; extern int tcp_state;
+        if (tcp_state != 2) return 0; 
         if (tcp_inbox_ready) {
             int to_copy = count < tcp_inbox_size ? count : tcp_inbox_size;
             for(int i = 0; i < to_copy; i++) target_buffer[i] = tcp_inbox[i];
-            target_buffer[to_copy] = '\0';
-            tcp_inbox_ready = 0;
-            tcp_inbox_size = 0;
+            target_buffer[to_copy] = '\0'; tcp_inbox_ready = 0; tcp_inbox_size = 0;
             return to_copy;
         }
-        return 0; // Veri gelene kadar bekle
+        return 0; 
     }
-    // Eğer Disk Dosyasıysa (type == 0), eski okuma mantığına devam et:
+    
+    // GÜÇLENDİRİLMİŞ DİSK OKUMA (ATA 128 Sektör Chunking)
     if (file->offset >= file->size) return 0; 
     
     int bytes_left = file->size - file->offset;
     if (count > bytes_left) count = bytes_left;
     
     unsigned int sectors_to_read = (file->size + 511) / 512;
-    if (sectors_to_read == 0) sectors_to_read = 1;
+    unsigned int current_lba = file->lba_start;
+    unsigned short* dest_ptr = (unsigned short*)target_buffer;
     
-    ata_lba_read(file->lba_start, sectors_to_read, (unsigned short*)target_buffer);
+    // Donanımı boğmamak için devasa dosyaları 64KB (128 sektör) parçalarla çekiyoruz!
+    while (sectors_to_read > 0) {
+        unsigned char chunk = (sectors_to_read > 128) ? 128 : sectors_to_read;
+        ata_lba_read(current_lba, chunk, dest_ptr);
+        current_lba += chunk;
+        dest_ptr += (chunk * 256);
+        sectors_to_read -= chunk;
+    }
     
     file->offset += count; 
     return count; 

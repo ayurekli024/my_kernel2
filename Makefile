@@ -100,6 +100,7 @@ disk: yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf
 	mcopy -o -i c.img wm.elf ::/WM.ELF
 	mcopy -o -i c.img explorer.elf ::/EXPLORER.ELF
 	mcopy -o -i c.img tarayici.elf ::/TARAYICI.ELF
+	mcopy -o -i c.img arka.bmp ::/ARKA.BMP
 
 # 5. Aşama: QEMU'yu başlat (Başlamadan önce ISO ve disk otomatik güncellenir)
 run: $(ISO_TARGET) disk

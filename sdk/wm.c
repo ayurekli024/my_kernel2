@@ -3,10 +3,8 @@
 #include "../src/font.h"
 #include "../src/cursor.h"
 
-// Çekirdekle Paylaşılan Ortak Hafıza (Shared Memory)
 gui_state_t* gui;
 
-// Grafik ve Çift Tampon (Double Buffering) Değişkenleri
 unsigned int* framebuffer;
 unsigned int* back_buffer;
 int screen_width = 1024, screen_height = 768;
@@ -15,10 +13,91 @@ int clip_min_x = 0, clip_min_y = 0, clip_max_x = 1024, clip_max_y = 768;
 int dirty_min_x = 0, dirty_min_y = 0, dirty_max_x = 1024, dirty_max_y = 768;
 int last_mouse_x = 0, last_mouse_y = 0;
 int mouse_x = 0, mouse_y = 0, mouse_left_button = 0;
-int blink_counter = 0; // İmleç için
+int blink_counter = 0; 
+
+// Derleyici için fonksiyon tanıtımları
+void draw_rect(int x, int y, int width, int height, unsigned int color);
+void draw_string(int x, int y, const char* str, unsigned int fg_color, unsigned int bg_color);
 
 // ========================================================
-// 1. ÇİZİM VE KESME (CLIPPING) MOTORLARI
+// 16-BİT DUVAR KAĞIDI VE DEDEKTİF (DEBUG) MOTORU
+// ========================================================
+unsigned short* wallpaper_buffer = (unsigned short*)0xE10000; 
+int wallpaper_loaded = 0; 
+
+// Canlı Hata Ayıklama (Debug) Değişkenleri
+int dbg_fd = -1;
+int dbg_read = -1;
+int dbg_w = 0;
+int dbg_h = 0;
+short dbg_bpp = 0;
+char dbg_sig[3] = "??";
+
+void load_wallpaper() {
+    dbg_fd = sys_open("ARKA    ", "BMP");
+    if (dbg_fd < 0) return;
+
+    // Yeni RAM istemek yok! Geçici olarak back_buffer'ı tepsi gibi kullanıyoruz.
+    unsigned char* raw_bmp = (unsigned char*)back_buffer; 
+    dbg_read = sys_read(dbg_fd, raw_bmp, 2360000);
+    sys_close(dbg_fd);
+
+    // Eğer donanımdan en azından başlık kısmı (54 bayt) geldiyse değerleri çek
+    if (dbg_read > 54) {
+        dbg_sig[0] = raw_bmp[0];
+        dbg_sig[1] = raw_bmp[1];
+        dbg_sig[2] = '\0';
+        dbg_w = *(int*)&raw_bmp[18];
+        dbg_h = *(int*)&raw_bmp[22];
+        dbg_bpp = *(short*)&raw_bmp[28];
+
+        if (raw_bmp[0] == 'B' && raw_bmp[1] == 'M' && dbg_bpp >= 24 && dbg_w == 1024) {
+            int abs_h = (dbg_h < 0) ? -dbg_h : dbg_h;
+            int row_padded = (dbg_w * (dbg_bpp / 8) + 3) & (~3);
+
+            for (int y = 0; y < abs_h && y < 768; y++) {
+                int bmp_y = (dbg_h > 0) ? (abs_h - 1 - y) : y; 
+                for (int x = 0; x < dbg_w; x++) {
+                    int p = 54 + (bmp_y * row_padded) + (x * (dbg_bpp / 8));
+                    unsigned char b = raw_bmp[p];
+                    unsigned char g = raw_bmp[p+1];
+                    unsigned char r = raw_bmp[p+2];
+                    wallpaper_buffer[y * 1024 + x] = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+                }
+            }
+            wallpaper_loaded = 1;
+        }
+    }
+    
+    // Geçici tepsiyi temizle ki ekranda çöp pikseller kalmasın
+    for(int i = 0; i < 1024 * 768; i++) back_buffer[i] = gui->current_bg_color;
+}
+
+void draw_wallpaper() {
+    if (!wallpaper_loaded) {
+        draw_rect(0, 0, 1024, 768, gui->current_bg_color);
+        return;
+    }
+    
+    int start_x = (dirty_min_x > 0) ? dirty_min_x : 0; 
+    int start_y = (dirty_min_y > 0) ? dirty_min_y : 0;
+    int end_x = (dirty_max_x < screen_width) ? dirty_max_x : screen_width - 1; 
+    int end_y = (dirty_max_y < screen_height) ? dirty_max_y : screen_height - 1;
+    if (start_x > end_x || start_y > end_y) return; 
+
+    for (int i = start_y; i <= end_y; i++) {
+        for (int j = start_x; j <= end_x; j++) {
+            unsigned short c16 = wallpaper_buffer[i * 1024 + j];
+            unsigned int r = (c16 >> 8) & 0xF8;
+            unsigned int g = (c16 >> 3) & 0xFC;
+            unsigned int b = (c16 << 3) & 0xF8;
+            back_buffer[i * screen_width + j] = (r << 16) | (g << 8) | b;
+        }
+    }
+}
+
+// ========================================================
+// ÇİZİM VE KESME (CLIPPING) MOTORLARI
 // ========================================================
 void set_clipping_rect(int x, int y, int w, int h) {
     clip_min_x = (x < 0) ? 0 : x; clip_min_y = (y < 0) ? 0 : y;
@@ -102,7 +181,7 @@ void draw_cursor(int x, int y) {
 }
 
 // ========================================================
-// 2. KULLANICI ARAYÜZÜ (GUI) BİLEŞENLERİ
+// KULLANICI ARAYÜZÜ (GUI) BİLEŞENLERİ
 // ========================================================
 void draw_window(window_t* win) {
     if (!win->is_open) return;
@@ -118,7 +197,6 @@ void draw_taskbar() {
     draw_rect(55, 732, 40, 32, 0x00333333); draw_string(71, 742, "=", 0x00FFFFFF, 0x00333333);
     draw_rect(105, 732, 35, 32, 0x00333333); draw_string(117, 742, ">", 0x00FFFFFF, 0x00333333);
     
-    // API Üzerinden Saat Çekimi!
     int h, m;
     sys_get_time(&h, &m);
     char hs[10], ms[10]; itoa(h, hs); itoa(m, ms);
@@ -153,7 +231,7 @@ void draw_context_menu() {
 }
 
 // ========================================================
-// 3. FARE VE RENDER DÖNGÜLERİ (ANA MOTOR)
+// FARE VE RENDER DÖNGÜLERİ (ANA MOTOR)
 // ========================================================
 void process_mouse_events() {
     sys_get_mouse(&mouse_x, &mouse_y, &mouse_left_button);
@@ -190,8 +268,8 @@ void process_mouse_events() {
                             }
                         }
                         else if (action == 2) {
-                            sys_kill(gui->windows[gui->focused_window].owner_task_id); // Çekirdeğe uygulamayı silmesini emret!
-                            gui->windows[gui->focused_window].is_open = 0; // Arayüzden de sil
+                            sys_kill(gui->windows[gui->focused_window].owner_task_id); 
+                            gui->windows[gui->focused_window].is_open = 0; 
                             for (int i = 0; i < MAX_WINDOWS; i++) { if (gui->windows[i].is_open && !gui->windows[i].is_minimized) { gui->focused_window = i; break; } }
                         }
                     }
@@ -278,7 +356,7 @@ void render_gui() {
     if (gui->force_redraw == 1) mark_screen_dirty(); 
     gui->force_redraw = 0;
     
-    draw_rect(0, 0, 1024, 768, gui->current_bg_color); 
+    draw_wallpaper(); 
     
     for (int s = 0; s < gui->desktop_shape_count; s++) {
         draw_rect(gui->desktop_shape_x[s], gui->desktop_shape_y[s], gui->desktop_shape_w[s], gui->desktop_shape_h[s], gui->desktop_shape_color[s]);
@@ -295,13 +373,13 @@ void render_gui() {
         draw_window(&gui->windows[w_idx]); 
         set_clipping_rect(gui->windows[w_idx].x + 2, gui->windows[w_idx].y + 32, gui->windows[w_idx].w - 4, gui->windows[w_idx].h - 34);
 
-        if (w_idx == 0) { // Terminal
+        if (w_idx == 0) { 
             for (int line = 0; line < gui->terminal_line_count; line++) {
                 draw_string(gui->windows[0].x + 10, gui->windows[0].y + 40 + (line * 16), gui->terminal_lines[line], 0x00000000, 0xFFFFFFFF);
             }
             draw_string(gui->windows[0].x + 10, gui->windows[0].y + gui->windows[0].h - 25, gui->user_input, 0x000000AA, 0xFFFFFFFF); 
         } 
-        else if (w_idx == 1) { // Sistem Monitörü
+        else if (w_idx == 1) { 
             draw_string(gui->windows[1].x + 10, gui->windows[1].y + 40, "PID  DURUM   CPU%", 0x00000000, 0xFFFFFFFF);
             draw_rect(gui->windows[1].x + 10, gui->windows[1].y + 55, gui->windows[1].w - 20, 2, 0x00BBBBBB);
             int y_offset = 65;
@@ -319,7 +397,7 @@ void render_gui() {
                 y_offset += 20;
             }
         }
-        else if (w_idx >= 2) { // Dış Uygulamalar (Editör vb.)
+        else if (w_idx >= 2) { 
             draw_rect(gui->windows[w_idx].x + 2, gui->windows[w_idx].y + 32, gui->windows[w_idx].w - 4, gui->windows[w_idx].h - 34, 0x00F0F0F0);
             for (int s = 0; s < gui->windows[w_idx].shape_count; s++) {
                 draw_rect(gui->windows[w_idx].x + gui->windows[w_idx].shape_x[s], gui->windows[w_idx].y + 32 + gui->windows[w_idx].shape_y[s], 
@@ -340,6 +418,20 @@ void render_gui() {
         reset_clipping_rect();
     }
     
+    // İŞTE EFSANE ZIRH: Ekrana Canlı Debug Basıyoruz!
+    char debug_msg[128] = "BMP HATA AYIKLAMA -> FD: ";
+    char tmp[16];
+    itoa(dbg_fd, tmp); strcat(debug_msg, tmp);
+    strcat(debug_msg, " | OKUNAN: "); itoa(dbg_read, tmp); strcat(debug_msg, tmp);
+    strcat(debug_msg, " | BPP: "); itoa(dbg_bpp, tmp); strcat(debug_msg, tmp);
+    strcat(debug_msg, " | BOYUT: "); itoa(dbg_w, tmp); strcat(debug_msg, tmp);
+    strcat(debug_msg, "x"); itoa(dbg_h, tmp); strcat(debug_msg, tmp);
+    strcat(debug_msg, " | IMZA: "); strcat(debug_msg, dbg_sig);
+
+    // Debug şeridini ekranın en üstüne siyah kutu içine çiz
+    draw_rect(0, 0, 1024, 20, 0x00000000);
+    draw_string(5, 5, debug_msg, 0x00FFFFFF, 0x00000000);
+
     draw_taskbar();
     draw_context_menu(); 
     draw_cursor(mouse_x, mouse_y);
@@ -347,9 +439,11 @@ void render_gui() {
 }
 
 void _start(char* args) {
-    gui = (gui_state_t*)sys_shm_get(); // Ortak Hafızaya bağlan!
-    sys_get_screen(&framebuffer, &screen_width, &screen_height); // Framebuffer'ı al
-    back_buffer = (unsigned int*)malloc(screen_width * screen_height * 4); // User Space'te RAM ayır!
+    gui = (gui_state_t*)sys_shm_get(); 
+    sys_get_screen(&framebuffer, &screen_width, &screen_height); 
+    back_buffer = (unsigned int*)sys_malloc(screen_width * screen_height * 4); 
+    
+    load_wallpaper();
     
     reset_clipping_rect(); mark_screen_dirty();
     
@@ -359,6 +453,6 @@ void _start(char* args) {
         process_mouse_events();
         render_gui();
         
-        sys_yield(); // Çekirdeği yormadan bekle
+        sys_yield();
     }
 }

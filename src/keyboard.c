@@ -8,7 +8,7 @@ int kbd_tail = 0;
 
 // YENİ: Shift tuşunun basılı olup olmadığını tutan "Durum (State)" değişkenimiz
 int shift_pressed = 0; 
-
+int ctrl_pressed = 0;
 // Normal QWERTY Haritası
 const char kbd_us[128] = {
     0,  27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
@@ -37,45 +37,28 @@ void keyboard_handler_main() {
     if (status & 0x01) {
         unsigned char scancode = inb(0x60);
         
-        // 1. KONTROL: Shift tuşları bırakıldı mı? (Break Codes: 0xAA veya 0xB6)
-        if (scancode == 0x48 || scancode == 0x50) {
-            // Aşağıda işleyeceğimiz için burayı boş geçiyoruz, Break kontrolüne takılmasın
-        } else {
-            if (scancode == 0xAA || scancode == 0xB6) {
-                shift_pressed = 0; // Shift'ten elini çekti, durumu sıfırla
-                return;
-            }
-        }
+        // 1. KONTROL: Shift ve Ctrl bırakıldı mı? (Break Codes)
+        if (scancode == 0x48 || scancode == 0x50) { } 
+        else if (scancode == 0xAA || scancode == 0xB6) { shift_pressed = 0; return; }
+        else if (scancode == 0x9D) { ctrl_pressed = 0; return; } // YENİ: Ctrl Bırakıldı
 
-        // 2. KONTROL: Shift tuşlarına basıldı mı? (Make Codes: 0x2A veya 0x36)
-        if (scancode == 0x2A || scancode == 0x36) {
-            shift_pressed = 1; // Shift basılı, durumu aktifleştir
-            return;
-        }
+        // 2. KONTROL: Shift ve Ctrl basıldı mı? (Make Codes)
+        if (scancode == 0x2A || scancode == 0x36) { shift_pressed = 1; return; }
+        if (scancode == 0x1D) { ctrl_pressed = 1; return; } // YENİ: Ctrl Basıldı
         
-        // 3. KONTROL: Diğer tuşların bırakılma (Break) olaylarını yoksay
-        // Ok tuşlarının make code'ları 0x80'den küçük olduğu için buraya takılmazlar
-        if (!(scancode == 0x48 || scancode == 0x50) && (scancode & 0x80)) {
-            return; 
-        }
+        if (!(scancode == 0x48 || scancode == 0x50) && (scancode & 0x80)) return; 
 
-        // 4. KARAR: Hangi haritayı kullanacağız?
         char c = 0;
-        
-        // DÜZELTME: Ok tuşlarını doğrudan karakter değişkenine (c) atıyoruz!
-        if (scancode == 0x48) {
-            c = 17; // Yukarı Ok kodu
-        } else if (scancode == 0x50) {
-            c = 18; // Aşağı Ok kodu
-        } else {
-            if (shift_pressed) {
-                c = kbd_us_shifted[scancode]; // Shift basılıysa büyük harf
-            } else {
-                c = kbd_us[scancode];         // Değilse normal harf
-            }
+        if (scancode == 0x48) c = 17; 
+        else if (scancode == 0x50) c = 18; 
+        else {
+            // İŞTE SİHİR BURADA: Donanım kesmelerini gizli ASCII kodlarına çeviriyoruz!
+            if (ctrl_pressed && scancode == 0x2E) c = 3;      // Ctrl + C (ASCII 3: ETX)
+            else if (ctrl_pressed && scancode == 0x2F) c = 22; // Ctrl + V (ASCII 22: SYN)
+            else if (shift_pressed) c = kbd_us_shifted[scancode];
+            else c = kbd_us[scancode];
         }
 
-        // Karakteri (veya ok tuşu şifresini) kuyruğa (Buffer) güvenle ekle
         if (c != 0) {
             int next_head = (kbd_head + 1) % BUFFER_SIZE;
             if (next_head != kbd_tail) { 

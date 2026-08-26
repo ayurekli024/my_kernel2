@@ -19,8 +19,11 @@ typedef struct {
     int shape_w[MAX_SHAPES_PER_WIN]; int shape_h[MAX_SHAPES_PER_WIN];
     unsigned int shape_color[MAX_SHAPES_PER_WIN];
     int is_minimized;
+    // ... (önceki değişkenler)
     int prev_x, prev_y, prev_w, prev_h;
     char text_content[1024];
+    int sel_start; // YENİ: Farenin ilk tıklandığı harfin indeksi
+    int sel_end;   // YENİ: Farenin sürüklendiği son harfin indeksi
 } window_t;
 
 // YENİ: Çekirdek ve WM.ELF'in ortak kullandığı devasa köprü!

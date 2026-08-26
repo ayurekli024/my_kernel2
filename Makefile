@@ -86,9 +86,12 @@ explorer.elf: sdk/explorer.c sdk/libc.o
 tarayici.elf: sdk/tarayici.c sdk/libc.o
 	$(CC) $(APP_CFLAGS) -c sdk/tarayici.c -o sdk/tarayici.o
 	ld -m elf_i386 -T sdk/app.ld sdk/tarayici.o sdk/libc.o -o tarayici.elf
+hesap.elf: sdk/hesap.c sdk/libc.o
+	$(CC) $(APP_CFLAGS) -c sdk/hesap.c -o sdk/hesap.o
+	ld -m elf_i386 -T sdk/app.ld sdk/hesap.o sdk/libc.o -o hesap.elf
 
 # 4. Aşama: Uygulamaları FAT16 Diske (c.img) Enjekte Etme
-disk: yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf edit.elf wm.elf explorer.elf tarayici.elf
+disk: yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf edit.elf wm.elf explorer.elf tarayici.elf hesap.elf
 	mcopy -o -i c.img yilan.elf ::/YILAN.ELF
 	mcopy -o -i c.img okuyucu.elf ::/OKUYUCU.ELF
 	mcopy -o -i c.img bomba.elf ::/BOMBA.ELF
@@ -101,6 +104,7 @@ disk: yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf
 	mcopy -o -i c.img explorer.elf ::/EXPLORER.ELF
 	mcopy -o -i c.img tarayici.elf ::/TARAYICI.ELF
 	mcopy -o -i c.img arka.bmp ::/ARKA.BMP
+	mcopy -o -i c.img hesap.elf ::/HESAP.ELF
 
 # 5. Aşama: QEMU'yu başlat (Başlamadan önce ISO ve disk otomatik güncellenir)
 run: $(ISO_TARGET) disk
@@ -108,5 +112,5 @@ run: $(ISO_TARGET) disk
 
 # Temizlik
 clean:
-	rm -f src/*.o sdk/*.o $(TARGET) $(ISO_TARGET) yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf edit.elf wm.elf explorer.elf tarayici.elf
+	rm -f src/*.o sdk/*.o $(TARGET) $(ISO_TARGET) yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf edit.elf wm.elf explorer.elf tarayici.elf hesap.elf
 	rm -rf isodir

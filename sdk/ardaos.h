@@ -24,6 +24,15 @@ typedef struct {
     char text_content[1024];
     int sel_start; // YENİ: Farenin ilk tıklandığı harfin indeksi
     int sel_end;   // YENİ: Farenin sürüklendiği son harfin indeksi
+    int button_count;
+    int button_x[20]; int button_y[20];
+    int button_w[20]; int button_h[20];
+    char button_text[20][16];
+    int button_state[20]; 
+    
+    int event_count;
+    int event_type[20]; 
+    int event_id[20];
 } window_t;
 
 // YENİ: Çekirdek ve WM.ELF'in ortak kullandığı devasa köprü!
@@ -174,5 +183,11 @@ static inline void sys_set_clipboard(const char* text) {
 }
 static inline void sys_get_clipboard(char* buffer) {
     __asm__ __volatile__ ("int $0x80" : : "a"(37), "b"((unsigned int)buffer));
+}
+static inline int sys_create_button(int x, int y, int w, int h, const char* text) {
+    int btn_id; __asm__ __volatile__ ("int $0x80" : "=a"(btn_id) : "a"(38), "b"(x), "c"(y), "d"(w), "S"(h), "D"((unsigned int)text)); return btn_id;
+}
+static inline int sys_poll_event(int* out_id) {
+    int ev_type; __asm__ __volatile__ ("int $0x80" : "=a"(ev_type) : "a"(39), "b"((unsigned int)out_id)); return ev_type;
 }
 #endif

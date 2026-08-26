@@ -61,6 +61,7 @@ extern task_t* current_task;
 extern int task_to_kill;
 extern void terminal_print(const char* text);
 extern void yield(void);
+extern gui_state_t* gui;
 // Mavi Ekran (BSOD) Motoru
 void fault_handler(int int_no, int err_code) {
     (void)err_code;
@@ -488,6 +489,52 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         while (system_clipboard[i] != '\0' && i < 4095) { real_buf[i] = system_clipboard[i]; i++; }
         real_buf[i] = '\0';
         return 1;
+    }
+    // API No 38: Buton Oluştur
+    else if (sys_num == 38) {
+        for (int i = 2; i < MAX_WINDOWS; i++) {
+            if (gui->windows[i].is_open && gui->windows[i].owner_task_id == current_task->id) {
+                int b = gui->windows[i].button_count;
+                if (b < 20) {
+                    gui->windows[i].button_x[b] = arg1; gui->windows[i].button_y[b] = arg2;
+                    gui->windows[i].button_w[b] = arg3; gui->windows[i].button_h[b] = arg4;
+                    
+                    unsigned int base = current_task->app_base;
+                    const char* text = (unsigned int)arg5 < 0x100000 ? (const char*)(base + arg5) : (const char*)arg5;
+                    int k = 0; while (text[k] && k < 15) { gui->windows[i].button_text[b][k] = text[k]; k++; }
+                    gui->windows[i].button_text[b][k] = '\0';
+                    
+                    gui->windows[i].button_state[b] = 0;
+                    gui->windows[i].button_count++;
+                    gui->force_redraw = 1;
+                    return b; 
+                }
+            }
+        }
+        return -1;
+    }
+    // API No 39: Olay (Event) Dinle (FIFO Kuyruk Motoru)
+    else if (sys_num == 39) {
+        for (int i = 2; i < MAX_WINDOWS; i++) {
+            if (gui->windows[i].is_open && gui->windows[i].owner_task_id == current_task->id) {
+                if (gui->windows[i].event_count > 0) {
+                    int e_type = gui->windows[i].event_type[0];
+                    int e_id = gui->windows[i].event_id[0];
+                    
+                    for (int j = 1; j < gui->windows[i].event_count; j++) {
+                        gui->windows[i].event_type[j-1] = gui->windows[i].event_type[j];
+                        gui->windows[i].event_id[j-1] = gui->windows[i].event_id[j];
+                    }
+                    gui->windows[i].event_count--;
+                    
+                    unsigned int base = current_task->app_base;
+                    int* ret_id = (unsigned int)arg1 < 0x100000 ? (int*)(base + arg1) : (int*)arg1;
+                    *ret_id = e_id;
+                    return e_type; // 1: Buton Tıklandı
+                }
+            }
+        }
+        return 0; // Olay yok
     }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
     return -1;

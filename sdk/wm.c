@@ -253,7 +253,16 @@ void process_mouse_events() {
                 int w_idx = gui->focused_window;
                 int txt_x = gui->windows[w_idx].x + 10;
                 int txt_y = gui->windows[w_idx].y + 40;
-                
+                // Buton isabet (Hit) kontrolü
+                for (int b = 0; b < gui->windows[w_idx].button_count; b++) {
+                    int bx = gui->windows[w_idx].x + gui->windows[w_idx].button_x[b];
+                    int by = gui->windows[w_idx].y + 32 + gui->windows[w_idx].button_y[b];
+                    if (mouse_x >= bx && mouse_x <= bx + gui->windows[w_idx].button_w[b] &&
+                        mouse_y >= by && mouse_y <= by + gui->windows[w_idx].button_h[b]) {
+                        gui->windows[w_idx].button_state[b] = 1; // Butonu göçert
+                        gui->force_redraw = 1;
+                    }
+                }
                 // Fare pencerelerin metin alanının içindeyse
                 if (mouse_x >= txt_x && mouse_y >= txt_y && 
                     mouse_x <= gui->windows[w_idx].x + gui->windows[w_idx].w - 10 &&
@@ -362,9 +371,27 @@ void process_mouse_events() {
                 add_dirty_rect(gui->windows[gui->focused_window].x, gui->windows[gui->focused_window].y, gui->windows[gui->focused_window].w, gui->windows[gui->focused_window].h);
             }
         } else {
-            for (int i = 0; i < MAX_WINDOWS; i++) gui->windows[i].is_dragging = 0;
+            // Fare sol tuşu bırakıldığında basılı butonları serbest bırak ve olay (Event) fırlat!
+            for (int i = 0; i < MAX_WINDOWS; i++) {
+                gui->windows[i].is_dragging = 0;
+                if (gui->windows[i].is_open) {
+                    for(int b = 0; b < gui->windows[i].button_count; b++) {
+                        if (gui->windows[i].button_state[b] == 1) {
+                            gui->windows[i].button_state[b] = 0; // Butonu eski haline getir
+                            gui->force_redraw = 1;
+                            
+                            // UYGULAMAYA SİNYAL FIRLAT!
+                            if (gui->windows[i].event_count < 20) {
+                                gui->windows[i].event_type[gui->windows[i].event_count] = 1; 
+                                gui->windows[i].event_id[gui->windows[i].event_count] = b;
+                                gui->windows[i].event_count++;
+                            }
+                        }
+                    }
+                }
+            }
             gui->any_window_dragging = 0;
-            is_selecting = 0;
+            is_selecting = 0; // Seçim modunu sıfırla
         }
         
         add_dirty_rect(mouse_x, mouse_y, 16, 16);
@@ -451,6 +478,32 @@ void render_gui() {
             }
             if (w_idx == gui->focused_window && blink_counter < 50) draw_rect(cursor_x, cursor_y, 8, 16, 0x00000000); 
         }
+        // YENİ: 3D Buton Render Motoru
+            for (int b = 0; b < gui->windows[w_idx].button_count; b++) {
+                int bx = gui->windows[w_idx].x + gui->windows[w_idx].button_x[b];
+                int by = gui->windows[w_idx].y + 32 + gui->windows[w_idx].button_y[b];
+                int bw = gui->windows[w_idx].button_w[b];
+                int bh = gui->windows[w_idx].button_h[b];
+                int state = gui->windows[w_idx].button_state[b];
+                
+                draw_rect(bx, by, bw, bh, 0x00D4D0C8); // Win95 Gövde Rengi
+                
+                // 3D Gölgeler (Basılıysa Işık Yön Değiştirir)
+                unsigned int c_top = (state == 1) ? 0x00808080 : 0x00FFFFFF;
+                unsigned int c_bot = (state == 1) ? 0x00FFFFFF : 0x00404040;
+                
+                draw_rect(bx, by, bw, 2, c_top); 
+                draw_rect(bx, by, 2, bh, c_top); 
+                draw_rect(bx, by + bh - 2, bw, 2, c_bot); 
+                draw_rect(bx + bw - 2, by, 2, bh, c_bot); 
+                
+                // Metni ortala ve tıklandığında 1 piksel kaydır
+                int t_len = 0; while (gui->windows[w_idx].button_text[b][t_len]) t_len++;
+                int tx = bx + (bw - (t_len * 8)) / 2;
+                int ty = by + (bh - 8) / 2;
+                if (state == 1) { tx++; ty++; } 
+                draw_string(tx, ty, gui->windows[w_idx].button_text[b], 0x00000000, 0x00D4D0C8);
+            }
         reset_clipping_rect();
     }
     

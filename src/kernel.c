@@ -310,8 +310,23 @@ void process_keyboard_events() {
             
             if (kbd_char == '\n') { 
                 terminal_print(gui->user_input); 
-                strcpy(pending_command, &(gui->user_input)[6]);
+                
+                // Kullanıcının yazdığı komutu al ("Arda> " kısmını atla)
+                char* entered_cmd = &(gui->user_input)[6];
+                
+                // YENİ: Komutu Geçmişe (History) Kaydet
+                if (entered_cmd[0] != '\0') {
+                    extern void strcpy(char*, const char*);
+                    strcpy(cmd_history[history_count % MAX_HISTORY], entered_cmd);
+                    history_count++;
+                    history_index = history_count; // İndeksi her zaman en sona (temiz satıra) al
+                }
+
+                // Uygulamanın çekmesi için komutu hazırla
+                strcpy(pending_command, entered_cmd);
                 command_ready = 1; 
+                
+                // Terminal satırını sıfırla
                 strcpy(gui->user_input, "Arda> ");
                 gui->input_idx = 6;
             }

@@ -271,7 +271,38 @@ void process_keyboard_events() {
         if (gui->focused_window >= 2 && gui->windows[gui->focused_window].is_open) {
             wake_task_by_id(gui->windows[gui->focused_window].owner_task_id);
         }
-        
+        // --- YENİ: ÇEKİRDEK SEVİYESİ CTRL+C (KOPYALA) ---
+        if (kbd_char == 3) { 
+            if (gui->focused_window >= 2 && gui->windows[gui->focused_window].sel_start != -1) {
+                int w_idx = gui->focused_window;
+                int s_min = (gui->windows[w_idx].sel_start < gui->windows[w_idx].sel_end) ? gui->windows[w_idx].sel_start : gui->windows[w_idx].sel_end;
+                int s_max = (gui->windows[w_idx].sel_start > gui->windows[w_idx].sel_end) ? gui->windows[w_idx].sel_start : gui->windows[w_idx].sel_end;
+                
+                extern char* system_clipboard;
+                int copy_idx = 0;
+                for (int i = s_min; i <= s_max && copy_idx < 4095; i++) {
+                    char c = gui->windows[w_idx].text_content[i];
+                    if (c == '\0') break;
+                    system_clipboard[copy_idx++] = c;
+                }
+                system_clipboard[copy_idx] = '\0';
+                terminal_print("[ SISTEM ] Metin basariyla panoya KOPYALANDI! (Ctrl+C)");
+            }
+        }
+        // --- YENİ: ÇEKİRDEK SEVİYESİ CTRL+V (YAPIŞTIR) ---
+        else if (kbd_char == 22) { 
+            if (gui->focused_window == 0) { // Sadece Terminale Yapıştır (Şimdilik)
+                extern char* system_clipboard;
+                int i = 0;
+                while(system_clipboard[i] != '\0' && gui->input_idx < 255) {
+                    if (system_clipboard[i] != '\n') { // Satır sonları terminal girdisini bozmasın
+                        gui->user_input[gui->input_idx++] = system_clipboard[i];
+                    }
+                    i++;
+                }
+                gui->user_input[gui->input_idx] = '\0';
+            }
+        }
         if (gui->focused_window >= 2 && gui->windows[gui->focused_window].is_open) {
             last_game_key = kbd_char;
         } else {

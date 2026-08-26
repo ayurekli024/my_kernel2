@@ -235,6 +235,7 @@ void draw_context_menu() {
 // ========================================================
 void process_mouse_events() {
     sys_get_mouse(&mouse_x, &mouse_y, &mouse_left_button);
+    static int is_selecting = 0;
     int delta_x = mouse_x - last_mouse_x; int delta_y = mouse_y - last_mouse_y;
 
     if (delta_x != 0 || delta_y != 0 || mouse_left_button) {
@@ -248,6 +249,26 @@ void process_mouse_events() {
         }
 
         if (mouse_left_button) {
+            if (gui->focused_window >= 2 && !gui->any_window_dragging && !gui->context_menu_open) {
+                int w_idx = gui->focused_window;
+                int txt_x = gui->windows[w_idx].x + 10;
+                int txt_y = gui->windows[w_idx].y + 40;
+                
+                // Fare pencerelerin metin alanının içindeyse
+                if (mouse_x >= txt_x && mouse_y >= txt_y && 
+                    mouse_x <= gui->windows[w_idx].x + gui->windows[w_idx].w - 10 &&
+                    mouse_y <= gui->windows[w_idx].y + gui->windows[w_idx].h - 10) {
+                    
+                    int col = (mouse_x - txt_x) / 8;
+                    int row = (mouse_y - txt_y) / 16;
+                    int chars_per_line = (gui->windows[w_idx].w - 20) / 8;
+                    int index = (row * chars_per_line) + col;
+                    
+                    if (!is_selecting) { gui->windows[w_idx].sel_start = index; is_selecting = 1; }
+                    gui->windows[w_idx].sel_end = index;
+                    gui->force_redraw = 1;
+                }
+            }
             if (!gui->any_window_dragging) {
                 if (gui->context_menu_open) {
                     if (mouse_x >= 55 && mouse_x <= 175 && mouse_y >= 638 && mouse_y < 728) {
@@ -343,6 +364,7 @@ void process_mouse_events() {
         } else {
             for (int i = 0; i < MAX_WINDOWS; i++) gui->windows[i].is_dragging = 0;
             gui->any_window_dragging = 0;
+            is_selecting = 0;
         }
         
         add_dirty_rect(mouse_x, mouse_y, 16, 16);
@@ -403,17 +425,31 @@ void render_gui() {
                 draw_rect(gui->windows[w_idx].x + gui->windows[w_idx].shape_x[s], gui->windows[w_idx].y + 32 + gui->windows[w_idx].shape_y[s], 
                           gui->windows[w_idx].shape_w[s], gui->windows[w_idx].shape_h[s], gui->windows[w_idx].shape_color[s]);
             }
+            
             int txt_x = gui->windows[w_idx].x + 10; int txt_y = gui->windows[w_idx].y + 40;
-            char line_buf[80]; int l_idx = 0;
+            int cursor_x = txt_x; int cursor_y = txt_y;
+            
+            // YENİ: Harf harf çizim ve Mavi Vurgu (Highlight) Motoru
+            int s_min = (gui->windows[w_idx].sel_start < gui->windows[w_idx].sel_end) ? gui->windows[w_idx].sel_start : gui->windows[w_idx].sel_end;
+            int s_max = (gui->windows[w_idx].sel_start > gui->windows[w_idx].sel_end) ? gui->windows[w_idx].sel_start : gui->windows[w_idx].sel_end;
+
             for (int c = 0; gui->windows[w_idx].text_content[c] != '\0'; c++) {
-                if (gui->windows[w_idx].text_content[c] == '\n' || l_idx >= ((gui->windows[w_idx].w - 20) / 8)) {
-                    line_buf[l_idx] = '\0'; draw_string(txt_x, txt_y, line_buf, 0x00000000, 0x00F0F0F0); 
-                    txt_y += 16; l_idx = 0; if (gui->windows[w_idx].text_content[c] == '\n') continue;
+                if (gui->windows[w_idx].text_content[c] == '\n' || cursor_x + 8 > gui->windows[w_idx].x + gui->windows[w_idx].w - 10) {
+                    cursor_x = txt_x; cursor_y += 16; 
+                    if (gui->windows[w_idx].text_content[c] == '\n') continue;
                 }
-                line_buf[l_idx++] = gui->windows[w_idx].text_content[c];
+                
+                unsigned int bg = 0x00F0F0F0; unsigned int fg = 0x00000000;
+                
+                // Eğer harf fare ile seçilen aralığa düşüyorsa, Mavi Arka Plan - Beyaz Yazı yap!
+                if (gui->windows[w_idx].sel_start != -1 && c >= s_min && c <= s_max) {
+                    bg = 0x000078D7; fg = 0x00FFFFFF; 
+                }
+                
+                draw_char(cursor_x, cursor_y, gui->windows[w_idx].text_content[c], fg, bg);
+                cursor_x += 8;
             }
-            line_buf[l_idx] = '\0'; draw_string(txt_x, txt_y, line_buf, 0x00000000, 0x00F0F0F0);
-            if (w_idx == gui->focused_window && blink_counter < 50) draw_rect(txt_x + (l_idx * 8), txt_y, 8, 16, 0x00000000); 
+            if (w_idx == gui->focused_window && blink_counter < 50) draw_rect(cursor_x, cursor_y, 8, 16, 0x00000000); 
         }
         reset_clipping_rect();
     }

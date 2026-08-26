@@ -38,7 +38,7 @@ int task1_counter = 0;
 
 char pending_command[256] = "";
 volatile int command_ready = 0;
-
+char* system_clipboard; // Pano için sadece işaretçi, RAM Heap'ten gelecek!
 // ==========================================
 // 2. YARDIMCI FONKSİYONLAR VE API'LER
 // ==========================================
@@ -328,7 +328,9 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     
     init_paging((unsigned int)vesa_framebuffer); 
     init_heap(); init_tasking(); create_task(background_task, 0, "");
-
+    // YENİ: Panoyu BSS'te değil, güvenli Heap belleğinde (8. MB) oluşturuyoruz!
+    system_clipboard = (char*)malloc(4096);
+    for(int i = 0; i < 4096; i++) system_clipboard[i] = '\0';
     // ZEKİ CELLAT ZIRHI: Kernel Panic çizebilsin diye grafiği Kernel'de de başlat!
     extern void init_graphics(unsigned int*, int, int);
     if (vesa_framebuffer != 0) init_graphics(vesa_framebuffer, 1024, 768);

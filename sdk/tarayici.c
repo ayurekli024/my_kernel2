@@ -130,5 +130,17 @@ void _start(char* args) {
         sys_set_window_text(clean_buf);
     }
 
-    while(1) sys_yield();
+    sys_set_window_text(clean_buf); // Google'ın HTML'den temizlenmiş halini çiz
+
+    // KLAVYE DİNLEYİCİSİ (COPY MOTORU)
+    while(1) {
+        char k = sys_poll_key(); // Çekirdekten tuş çek
+        if (k == 'c' || k == 'C') {
+            sys_set_clipboard(clean_buf); // 4KB'a kadar olan metni çekirdeğe yolla!
+            
+            // Kullanıcıya kopyalandığını hissettirmek için ekrana kısa bir bilgi bas
+            sys_set_window_text("\n\n[ BILGI ] Web sayfasi basariyla Panoya KOPYALANDI!\n\nTerminale gecip 'pano' yazarak yapistirabilirsiniz.");
+        }
+        sys_yield();
+    }
 }

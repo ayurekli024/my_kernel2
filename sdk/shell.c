@@ -68,6 +68,19 @@ void _start() {
                 sys_get_process_list(response);
                 sys_print(response);
             }
+            // [ IPC - KOPYALA / YAPIŞTIR MOTORU ]
+            else if (strcmp(cmd, "pano") == 0) {
+                char clipboard_buf[4096];
+                sys_get_clipboard(clipboard_buf); // Çekirdekten veriyi em!
+                
+                if (clipboard_buf[0] == '\0') {
+                    sys_print("[ PANO ] Pano su an bos. Tarayicidan 'C' tusuna basarak veri kopyalayabilirsiniz.\n");
+                } else {
+                    sys_print("[ PANO ICERIGI ]\n");
+                    sys_print(clipboard_buf);
+                    sys_print("\n");
+                }
+            }
             else if (strncmp(cmd, "kill ", 5) == 0) {
                 int target_pid = atoi(&cmd[5]);
                 if (target_pid == 0 || target_pid == 1 || target_pid == 2) {

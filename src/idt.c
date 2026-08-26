@@ -467,6 +467,28 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         }
         return 0;
     }
+    // YENİ - API No 36: sys_set_clipboard (Panoya Kopyala)
+    else if (sys_num == 36) {
+        extern char* system_clipboard; // Köprüyü İşaretçi (Pointer) olarak güncelle// Çekirdekteki panoya köprü kur!
+        unsigned int base = current_task->app_base;
+        const char* real_text = (unsigned int)arg1 < 0x100000 ? (const char*)(base + arg1) : (const char*)arg1;
+        int i = 0;
+        // Çekirdeğin güvenli panosuna bayt bayt kopyala
+        while (real_text[i] != '\0' && i < 4095) { system_clipboard[i] = real_text[i]; i++; }
+        system_clipboard[i] = '\0';
+        return 1;
+    }
+    // YENİ - API No 37: sys_get_clipboard (Panodan Yapıştır)
+    else if (sys_num == 37) {
+        extern char* system_clipboard; // Köprüyü İşaretçi (Pointer) olarak güncelle// Çekirdekteki panoya köprü kur!
+        unsigned int base = current_task->app_base;
+        char* real_buf = (unsigned int)arg1 < 0x100000 ? (char*)(base + arg1) : (char*)arg1;
+        int i = 0;
+        // Panodaki veriyi uygulamanın belleğine fırlat
+        while (system_clipboard[i] != '\0' && i < 4095) { real_buf[i] = system_clipboard[i]; i++; }
+        real_buf[i] = '\0';
+        return 1;
+    }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
     return -1;
 }

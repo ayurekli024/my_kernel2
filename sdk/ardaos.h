@@ -165,4 +165,11 @@ static inline int sys_get_window_pos(int win_id, int* x, int* y, int* w, int* h)
     __asm__ __volatile__ ("int $0x80" : "=a"(ret) : "a"(35), "b"(win_id), "c"(x), "d"(y), "S"(w), "D"(h));
     return ret;
 }
+// YENİ - IPC Pano Sistem Çağrıları
+static inline void sys_set_clipboard(const char* text) {
+    __asm__ __volatile__ ("int $0x80" : : "a"(36), "b"((unsigned int)text));
+}
+static inline void sys_get_clipboard(char* buffer) {
+    __asm__ __volatile__ ("int $0x80" : : "a"(37), "b"((unsigned int)buffer));
+}
 #endif

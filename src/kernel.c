@@ -60,6 +60,8 @@ int api_create_window(const char* title, int w, int h) {
             gui->windows[i].w = w; gui->windows[i].h = h;
             gui->windows[i].is_open = 1; gui->windows[i].is_dragging = 0;
             gui->windows[i].is_minimized = 0;
+            gui->windows[i].button_count = 0; // YENİ: Butonları sıfırla
+            gui->windows[i].event_count = 0;
             gui->windows[i].text_content[0] = '\0';
             
             int j = 0;

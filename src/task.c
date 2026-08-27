@@ -34,6 +34,8 @@ void init_tasking() {
 
 int create_task(void (*func)(void), unsigned int app_base, char* args) {
     task_t* new_task = (task_t*)malloc(sizeof(task_t));
+    unsigned char* p = (unsigned char*)new_task;
+    for(unsigned int i = 0; i < sizeof(task_t); i++) p[i] = 0;
     new_task->id = next_pid++;
     new_task->app_base = app_base; 
     // init_tasking() ve create_task() içindeki atamaların arasına ekle:

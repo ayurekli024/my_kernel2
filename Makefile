@@ -92,6 +92,8 @@ hesap.elf: sdk/hesap.c sdk/libc.o
 
 # 4. Aşama: Uygulamaları FAT16 Diske (c.img) Enjekte Etme
 disk: yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf edit.elf wm.elf explorer.elf tarayici.elf hesap.elf
+	dd if=/dev/zero of=c.img bs=1024 count=10240
+	mkfs.fat -F 16 c.img
 	mcopy -o -i c.img yilan.elf ::/YILAN.ELF
 	mcopy -o -i c.img okuyucu.elf ::/OKUYUCU.ELF
 	mcopy -o -i c.img bomba.elf ::/BOMBA.ELF
@@ -105,6 +107,7 @@ disk: yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf
 	mcopy -o -i c.img tarayici.elf ::/TARAYICI.ELF
 	mcopy -o -i c.img arka.bmp ::/ARKA.BMP
 	mcopy -o -i c.img hesap.elf ::/HESAP.ELF
+	sync
 
 # 5. Aşama: QEMU'yu başlat (Başlamadan önce ISO ve disk otomatik güncellenir)
 run: $(ISO_TARGET) disk

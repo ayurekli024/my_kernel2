@@ -13,21 +13,53 @@ extern void strcat(char* dest, const char* src);
 unsigned int rtl_io_base = 0;
 unsigned char mac_address[6];
 unsigned char* rx_buffer;
-
+// --- GERİ GELEN UDP DEĞİŞKENLERİ ---
 unsigned char udp_inbox[2048];
 int udp_inbox_size = 0;
 volatile int udp_inbox_ready = 0;
 
-unsigned char tcp_dest_ip[4] = {0};
-unsigned short tcp_dest_port = 80;
-unsigned short tcp_local_port = 55556;
-unsigned int tcp_seq = 0x11223344;
-unsigned int tcp_ack = 0;          
-int tcp_state = 0; 
-unsigned char tcp_inbox[8192]; 
-int tcp_inbox_size = 0;
-volatile int tcp_inbox_ready = 0;
+// --- YUKARI TAŞINAN ARP DEĞİŞKENLERİ VE İMZASI ---
+extern unsigned char router_mac[6];
+extern int arp_resolved;
+void rtl8139_send_arp(void);
 
+// ... (udp_inbox kısmı ve mac_address tanımları üstte kalacak) ...
+
+// =========================================================
+// YENİ: TCP SOKET YÖNETİCİSİ (MAX 16 EŞZAMANLI BAĞLANTI)
+// =========================================================
+
+tcp_socket_t tcp_sockets[16];
+unsigned short next_local_port = 55556;
+
+int net_socket_create() {
+    for (int i = 0; i < 16; i++) {
+        if (tcp_sockets[i].active == 0) {
+            tcp_sockets[i].active = 1;
+            tcp_sockets[i].state = TCP_CLOSED;
+            tcp_sockets[i].local_port = next_local_port++;
+            tcp_sockets[i].seq = 0x11223344 + i;
+            tcp_sockets[i].ack = 0;
+            tcp_sockets[i].rx_size = 0;
+            tcp_sockets[i].rx_ready = 0;
+            return i; // Soket Numarasını (Bilet) dön
+        }
+    }
+    return -1;
+}
+
+int net_tcp_connect(int sock_id, unsigned char* ip, unsigned short port) {
+    if (sock_id < 0 || sock_id >= 16 || !tcp_sockets[sock_id].active) return -1;
+    if (arp_resolved == 0) rtl8139_send_arp(); // Önce ARP çöz!
+    
+    for (int i = 0; i < 4; i++) tcp_sockets[sock_id].remote_ip[i] = ip[i];
+    tcp_sockets[sock_id].remote_port = port;
+    tcp_sockets[sock_id].state = TCP_SYN_SENT;
+    
+    // 0x02 = SYN Bayrağı
+    net_tcp_send(sock_id, 0x02, 0, 0); 
+    return 0;
+}
 void rtl8139_send_tcp(unsigned char flags, unsigned char* data, int data_len);
 
 void init_rtl8139() {
@@ -126,6 +158,8 @@ void rtl8139_handler_main() {
                 int ip_hdr_len = (packet[14] & 0x0F) * 4;
                 int tcp_hdr_start = 14 + ip_hdr_len;
                 unsigned char flags = packet[tcp_hdr_start + 13];
+                
+                unsigned short dest_port = (packet[tcp_hdr_start+2] << 8) | packet[tcp_hdr_start+3];
                 unsigned int incoming_seq = (packet[tcp_hdr_start+4]<<24) | (packet[tcp_hdr_start+5]<<16) | (packet[tcp_hdr_start+6]<<8) | packet[tcp_hdr_start+7];
                 
                 int tcp_hdr_len = (packet[tcp_hdr_start + 12] >> 4) * 4;
@@ -133,31 +167,37 @@ void rtl8139_handler_main() {
                 int total_len = (packet[16]<<8) | packet[17];
                 int data_len = total_len - ip_hdr_len - tcp_hdr_len;
 
-                if ((flags & 0x02) && (flags & 0x10)) { 
-                    tcp_ack = incoming_seq + 1; 
-                    tcp_state = 2; 
-                    rtl8139_send_tcp(0x10, 0, 0); 
-                    strcat(msg, " Bayt - [ TCP SYN-ACK ALINDI! ]");
-                } 
-                // ZIRH 2: Artık PSH (0x08) bayrağına bakmıyoruz, içinde 1 bayt bile veri varsa alıyoruz!
-                else if (data_len > 0) { 
-                    tcp_ack = incoming_seq + data_len;
-                    for(int i=0; i<data_len; i++) {
-                        if (tcp_inbox_size < 8190) tcp_inbox[tcp_inbox_size++] = packet[data_start+i];
-                    }
-                    tcp_inbox[tcp_inbox_size] = '\0';
-                    tcp_inbox_ready = 1; 
+                // Hedef Porta Göre Doğru Soketi Bul (Demultiplexing)
+                int s_id = -1;
+                for (int s = 0; s < 16; s++) {
+                    if (tcp_sockets[s].active && tcp_sockets[s].local_port == dest_port) { s_id = s; break; }
+                }
+
+                if (s_id != -1) {
+                    tcp_socket_t* sock = &tcp_sockets[s_id];
                     
-                    rtl8139_send_tcp(0x10, 0, 0); // Aldığımıza dair fırlat
-                    strcat(msg, " Bayt - [ TCP HTTP VERISI ALINDI! ]");
-                }
-                else if (flags & 0x01) { 
-                    tcp_ack = incoming_seq + 1;
-                    rtl8139_send_tcp(0x11, 0, 0); 
-                    strcat(msg, " Bayt - [ TCP FIN (KAPANDI) ]");
-                }
-                else {
-                    strcat(msg, " Bayt - [ TCP BOS ACK ]");
+                    if ((flags & 0x02) && (flags & 0x10)) { // SYN-ACK
+                        sock->ack = incoming_seq + 1; 
+                        sock->state = TCP_ESTABLISHED; 
+                        net_tcp_send(s_id, 0x10, 0, 0); // ACK yolla
+                        strcat(msg, " Bayt - [ TCP SYN-ACK ]");
+                    } 
+                    else if (data_len > 0) { // HTTP veya Veri
+                        sock->ack = incoming_seq + data_len;
+                        for(int i=0; i<data_len; i++) {
+                            if (sock->rx_size < 8190) sock->rx_buf[sock->rx_size++] = packet[data_start+i];
+                        }
+                        sock->rx_buf[sock->rx_size] = '\0';
+                        sock->rx_ready = 1; 
+                        net_tcp_send(s_id, 0x10, 0, 0); // ACK yolla
+                        strcat(msg, " Bayt - [ TCP DATA ]");
+                    }
+                    else if (flags & 0x01) { // FIN
+                        sock->ack = incoming_seq + 1;
+                        net_tcp_send(s_id, 0x11, 0, 0); // FIN-ACK
+                        sock->state = TCP_CLOSED;
+                        strcat(msg, " Bayt - [ TCP FIN ]");
+                    }
                 }
             }
             else strcat(msg, " Bayt (Tur: IPv4 Diger)");
@@ -251,9 +291,15 @@ void rtl8139_send_udp(unsigned char* dest_ip, unsigned short dest_port, unsigned
     tx_descriptor = (tx_descriptor + 1) % 4;
 }
 
-void rtl8139_send_tcp(unsigned char flags, unsigned char* data, int data_len) {
+// YENİ: İsmi güncellendi ve sock_id parametresi eklendi
+int net_tcp_send(int sock_id, unsigned char flags, unsigned char* data, int data_len) {
+    // Güvenlik: Geçersiz veya kapalı bir sokete yazmayı engelle
+    if (sock_id < 0 || sock_id >= 16 || !tcp_sockets[sock_id].active) return -1;
     if (tx_buffers[0] == 0) for(int i=0; i<4; i++) tx_buffers[i] = (unsigned char*)dma_alloc(2048);
-    if (arp_resolved == 0) return; 
+    if (arp_resolved == 0) return -1; 
+    
+    // Hedef soket bilgilerini global değişkenler yerine struct üzerinden çekiyoruz
+    tcp_socket_t* sock = &tcp_sockets[sock_id];
     unsigned char* current_tx = tx_buffers[tx_descriptor];
 
     static unsigned char packet[2048];
@@ -276,19 +322,24 @@ void rtl8139_send_tcp(unsigned char flags, unsigned char* data, int data_len) {
     packet[22] = 0x40; packet[23] = 0x06;
     
     unsigned char src_ip[4] = {10, 0, 2, 15};
-    for(int i=0; i<4; i++) { packet[26+i] = src_ip[i]; packet[30+i] = tcp_dest_ip[i]; }
+    for(int i=0; i<4; i++) { 
+        packet[26+i] = src_ip[i]; 
+        packet[30+i] = sock->remote_ip[i]; // GLOBAL YERİNE SOKET IP'Sİ
+    }
     
     unsigned short ip_csum = net_checksum(&packet[14], 20);
     packet[24] = ip_csum >> 8; packet[25] = ip_csum & 0xFF;
 
-    packet[34] = tcp_local_port >> 8; packet[35] = tcp_local_port & 0xFF;
-    packet[36] = tcp_dest_port >> 8;  packet[37] = tcp_dest_port & 0xFF;
+    // GLOBAL YERİNE SOKET PORTLARI
+    packet[34] = sock->local_port >> 8; packet[35] = sock->local_port & 0xFF;
+    packet[36] = sock->remote_port >> 8;  packet[37] = sock->remote_port & 0xFF;
     
-    packet[38] = (tcp_seq >> 24) & 0xFF; packet[39] = (tcp_seq >> 16) & 0xFF;
-    packet[40] = (tcp_seq >> 8) & 0xFF;  packet[41] = tcp_seq & 0xFF;
+    // GLOBAL YERİNE SOKET SEQUENCE (SIRA) VE ACK NUMARALARI
+    packet[38] = (sock->seq >> 24) & 0xFF; packet[39] = (sock->seq >> 16) & 0xFF;
+    packet[40] = (sock->seq >> 8) & 0xFF;  packet[41] = sock->seq & 0xFF;
     
-    packet[42] = (tcp_ack >> 24) & 0xFF; packet[43] = (tcp_ack >> 16) & 0xFF;
-    packet[44] = (tcp_ack >> 8) & 0xFF;  packet[45] = tcp_ack & 0xFF;
+    packet[42] = (sock->ack >> 24) & 0xFF; packet[43] = (sock->ack >> 16) & 0xFF;
+    packet[44] = (sock->ack >> 8) & 0xFF;  packet[45] = sock->ack & 0xFF;
     
     packet[46] = 0x50; 
     packet[47] = flags; 
@@ -298,7 +349,8 @@ void rtl8139_send_tcp(unsigned char flags, unsigned char* data, int data_len) {
 
     unsigned int csum = 0;
     csum += (src_ip[0]<<8)|src_ip[1]; csum += (src_ip[2]<<8)|src_ip[3];
-    csum += (tcp_dest_ip[0]<<8)|tcp_dest_ip[1]; csum += (tcp_dest_ip[2]<<8)|tcp_dest_ip[3];
+    csum += (sock->remote_ip[0]<<8)|sock->remote_ip[1]; // GLOBAL YERİNE SOKET IP'Sİ
+    csum += (sock->remote_ip[2]<<8)|sock->remote_ip[3];
     csum += 0x0006; csum += tcp_len;
     for(int i=0; i<tcp_len; i+=2) {
         unsigned short word = (packet[34+i]<<8) | (i+1 < tcp_len ? packet[34+i+1] : 0);
@@ -313,6 +365,9 @@ void rtl8139_send_tcp(unsigned char flags, unsigned char* data, int data_len) {
     outl(rtl_io_base + 0x10 + (tx_descriptor * 4), frame_len);
     tx_descriptor = (tx_descriptor + 1) % 4;
     
-    if (data_len > 0) tcp_seq += data_len;
-    else if (flags & 0x02 || flags & 0x01) tcp_seq += 1;
+    // GLOBAL YERİNE SOKET SEQUENCE GÜNCELLEMESİ
+    if (data_len > 0) sock->seq += data_len;
+    else if (flags & 0x02 || flags & 0x01) sock->seq += 1; // SYN veya FIN ise 1 artır
+    
+    return data_len;
 }

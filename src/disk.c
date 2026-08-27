@@ -3,6 +3,7 @@
 #include "string.h"
 #include "graphics.h"
 #include "task.h"
+#include "rtl8139.h"
 fat16_bpb_t bpb;
 unsigned int root_dir_start_lba;
 unsigned int data_start_lba;
@@ -338,12 +339,18 @@ int vfs_open(const char* filename, const char* ext) {
         return free_fd;
     }
     if (strncmp(filename, "NET", 3) == 0 && strncmp(ext, "TCP", 3) == 0) {
-        current_task->fd_table[free_fd].is_open = 1; current_task->fd_table[free_fd].type = 3;
-        extern unsigned char tcp_dest_ip[]; extern int tcp_state; extern unsigned short tcp_local_port;
-        extern void rtl8139_send_tcp(unsigned char, unsigned char*, int);
-        tcp_local_port++; 
-        tcp_dest_ip[0] = 142; tcp_dest_ip[1] = 250; tcp_dest_ip[2] = 187; tcp_dest_ip[3] = 46;
-        tcp_state = 1; rtl8139_send_tcp(0x02, 0, 0); 
+        extern int net_socket_create(void);
+        extern int net_tcp_connect(int, unsigned char*, unsigned short);
+        
+        int sock_id = net_socket_create();
+        if (sock_id < 0) return -1; // Soket havuzu doluysa reddet
+
+        current_task->fd_table[free_fd].is_open = 1; 
+        current_task->fd_table[free_fd].type = 3;
+        current_task->fd_table[free_fd].cluster = sock_id; // Soket ID'sini VFS'de sakla!
+        
+        unsigned char dest_ip[4] = {142, 250, 187, 46}; // Şimdilik hala Google
+        net_tcp_connect(sock_id, dest_ip, 80);
         return free_fd;
     }
 
@@ -391,12 +398,19 @@ int vfs_read(int fd, unsigned char* target_buffer, int count) {
         return 0;
     }
     if (file->type == 3) {
-        extern int tcp_inbox_ready; extern int tcp_inbox_size; extern unsigned char tcp_inbox[]; extern int tcp_state;
-        if (tcp_state != 2) return 0; 
-        if (tcp_inbox_ready) {
-            int to_copy = count < tcp_inbox_size ? count : tcp_inbox_size;
-            for(int i = 0; i < to_copy; i++) target_buffer[i] = tcp_inbox[i];
-            target_buffer[to_copy] = '\0'; tcp_inbox_ready = 0; tcp_inbox_size = 0;
+        extern tcp_socket_t tcp_sockets[];
+        int sock_id = file->cluster; // Soket ID'sini geri çağır
+        if (sock_id < 0 || sock_id >= 16 || !tcp_sockets[sock_id].active) return -1;
+        
+        tcp_socket_t* sock = &tcp_sockets[sock_id];
+        if (sock->state != TCP_ESTABLISHED) return 0; // ESTABLISHED değilse (hala el sıkışıyorsa) bekle
+        
+        if (sock->rx_ready) {
+            int to_copy = count < sock->rx_size ? count : sock->rx_size;
+            for(int i = 0; i < to_copy; i++) target_buffer[i] = sock->rx_buf[i];
+            target_buffer[to_copy] = '\0'; 
+            sock->rx_ready = 0; 
+            sock->rx_size = 0;
             return to_copy;
         }
         return 0; 
@@ -428,7 +442,18 @@ int vfs_read(int fd, unsigned char* target_buffer, int count) {
 // 3. sys_close: Bileti (FD) iptal et
 void vfs_close(int fd) {
     if (current_task != 0 && fd >= 0 && fd < MAX_FD_PER_TASK) {
-        current_task->fd_table[fd].is_open = 0; 
+        if (current_task->fd_table[fd].is_open) {
+            if (current_task->fd_table[fd].type == 3) {
+                // VFS kapanırken Soketi de güvenle kapat (FIN yolla) ve havuzu boşalt
+                extern tcp_socket_t tcp_sockets[];
+                int sock_id = current_task->fd_table[fd].cluster;
+                if (sock_id >= 0 && sock_id < 16 && tcp_sockets[sock_id].active) {
+                    net_tcp_send(sock_id, 0x11, 0, 0); // 0x11 = FIN | ACK
+                    tcp_sockets[sock_id].active = 0;
+                }
+            }
+            current_task->fd_table[fd].is_open = 0; 
+        }
     }
 }
 // YENİ: VFS Üzerinden Veri (veya Ağ Paketi) Yazma Motoru
@@ -445,12 +470,15 @@ int vfs_write(int fd, unsigned char* buffer, int count) {
         return count;
     }
     // TCP Soketi (Veriyi PSH | ACK bayraklarıyla yollar)
+    // TCP Soketi (Veriyi PSH | ACK bayraklarıyla yollar)
     if (file->type == 3) {
-        extern int tcp_state;
-        extern void rtl8139_send_tcp(unsigned char, unsigned char*, int);
-        if (tcp_state == 2) { 
-            rtl8139_send_tcp(0x18, buffer, count); // 0x18 = PSH ve ACK bayrakları açık!
-            return count;
+        extern tcp_socket_t tcp_sockets[];
+        int sock_id = file->cluster;
+        
+        if (sock_id >= 0 && sock_id < 16 && tcp_sockets[sock_id].active) {
+            if (tcp_sockets[sock_id].state == TCP_ESTABLISHED) { 
+                return net_tcp_send(sock_id, 0x18, buffer, count); // 0x18 = PSH | ACK
+            }
         }
         return -1;
     }

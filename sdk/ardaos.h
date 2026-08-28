@@ -191,4 +191,10 @@ static inline int sys_create_button(int x, int y, int w, int h, const char* text
 static inline int sys_poll_event(int* out_id) {
     int ev_type; __asm__ __volatile__ ("int $0x80" : "=a"(ev_type) : "a"(39), "b"((unsigned int)out_id)); return ev_type;
 }
+static inline int sys_list_dir(const char* path, char* buffer) {
+    int ret; __asm__ __volatile__ ("int $0x80" : "=a"(ret) : "a"(40), "b"((unsigned int)path), "c"((unsigned int)buffer)); return ret;
+}
+static inline void sys_clear_gui(void) {
+    __asm__ __volatile__ ("int $0x80" : : "a"(41));
+}
 #endif

@@ -536,6 +536,27 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         }
         return 0; // Olay yok
     }
+    // API No 40: Klasör Listele (vfs_list_dir)
+    else if (sys_num == 40) {
+        extern int vfs_list_dir(const char* path, char* buffer);
+        unsigned int base = current_task->app_base;
+        const char* path = (unsigned int)arg1 < 0x100000 ? (const char*)(base + arg1) : (const char*)arg1;
+        char* buf = (unsigned int)arg2 < 0x100000 ? (char*)(base + arg2) : (char*)arg2;
+        return vfs_list_dir(path, buf);
+    }
+    // API No 41: GUI Butonlarını Temizle (Dinamik Arayüz İçin)
+    else if (sys_num == 41) {
+        for (int i = 2; i < MAX_WINDOWS; i++) {
+            if (gui->windows[i].is_open && gui->windows[i].owner_task_id == current_task->id) {
+                gui->windows[i].button_count = 0; // Eski butonları çöpe at
+                gui->windows[i].event_count = 0;
+                gui->windows[i].sel_start = -1;
+                gui->force_redraw = 1;
+                return 0;
+            }
+        }
+        return -1;
+    }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
     return -1;
 }

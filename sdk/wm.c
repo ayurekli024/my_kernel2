@@ -196,7 +196,17 @@ void draw_taskbar() {
     draw_rect(10, 732, 35, 32, 0x00333333); draw_string(22, 742, "<", 0x00FFFFFF, 0x00333333);
     draw_rect(55, 732, 40, 32, 0x00333333); draw_string(71, 742, "=", 0x00FFFFFF, 0x00333333);
     draw_rect(105, 732, 35, 32, 0x00333333); draw_string(117, 742, ">", 0x00FFFFFF, 0x00333333);
-    
+    // YENİ: Ağ Aktivite Ledi (Saatin Yanında)
+    if (gui->net_activity_timer > 0) {
+        // Veri akışı varsa Parlak Yeşil LED yanar
+        draw_rect(935, 742, 10, 10, 0x0000FF00); 
+        gui->net_activity_timer--;
+        gui->force_redraw = 1; // Yanıp sönme animasyonunu akıcı tutmak için ekranı yenilemeye zorla
+    } else {
+        // Boştayken Sönük Gri LED
+        draw_rect(935, 742, 10, 10, 0x00333333); 
+    }
+
     int h, m;
     sys_get_time(&h, &m);
     char hs[10], ms[10]; itoa(h, hs); itoa(m, ms);

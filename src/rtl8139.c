@@ -1,7 +1,7 @@
 #include "rtl8139.h"
 #include "pci.h"
 #include "io.h"
-
+#include "../sdk/ardaos.h"
 // Dışarıdan Alınan Kernel Fonksiyonları
 extern void* dma_alloc(unsigned int size);
 extern void terminal_print(const char* text);
@@ -9,6 +9,7 @@ extern void api_print(const char* text);
 extern void itoa(int n, char s[]);
 extern void strcpy(char* dest, const char* src);
 extern void strcat(char* dest, const char* src);
+extern gui_state_t* gui;
 
 unsigned int rtl_io_base = 0;
 unsigned char mac_address[6];
@@ -210,6 +211,7 @@ void rtl8139_handler_main() {
     }
     outw(rtl_io_base + 0x3E, 0x05); 
     outb(0x20, 0x20); outb(0xA0, 0x20); 
+    if (gui) gui->net_activity_timer = 20;
 }
 
 __attribute__((naked)) void rtl8139_handler(void) {
@@ -289,6 +291,7 @@ void rtl8139_send_udp(unsigned char* dest_ip, unsigned short dest_port, unsigned
     outl(rtl_io_base + 0x20 + (tx_descriptor * 4), (unsigned int)current_tx);
     outl(rtl_io_base + 0x10 + (tx_descriptor * 4), total_len);
     tx_descriptor = (tx_descriptor + 1) % 4;
+    if (gui) gui->net_activity_timer = 20;
 }
 
 // YENİ: İsmi güncellendi ve sock_id parametresi eklendi
@@ -368,6 +371,6 @@ int net_tcp_send(int sock_id, unsigned char flags, unsigned char* data, int data
     // GLOBAL YERİNE SOKET SEQUENCE GÜNCELLEMESİ
     if (data_len > 0) sock->seq += data_len;
     else if (flags & 0x02 || flags & 0x01) sock->seq += 1; // SYN veya FIN ise 1 artır
-    
+    if (gui) gui->net_activity_timer = 20;
     return data_len;
 }

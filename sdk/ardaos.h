@@ -63,6 +63,7 @@ typedef struct {
     int sys_state[32]; 
     int sys_cpu[32];
     int sys_task_count;
+    int net_activity_timer;
 } gui_state_t;
 static inline void sys_yield() {
     __asm__ __volatile__ ("int $129");

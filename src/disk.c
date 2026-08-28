@@ -7,7 +7,19 @@
 fat16_bpb_t bpb;
 unsigned int root_dir_start_lba;
 unsigned int data_start_lba;
+// =========================================================
+// YENİ: UNIX İSİMLENDİRİLMİŞ BORULARI (NAMED PIPES / FIFO)
+// =========================================================
+typedef struct {
+    int active;
+    char name[16];     
+    char buffer[512];  
+    int head;          
+    int tail;          
+    int count;         
+} pipe_t;
 
+pipe_t system_pipes[16] = {0}; // = {0} ekleyerek tüm belleği kesin olarak sıfırla!
 void init_disk() {
     unsigned short boot_sector[256] = {0}; 
     int timeout = 100000;
@@ -353,7 +365,36 @@ int vfs_open(const char* filename, const char* ext) {
         net_tcp_connect(sock_id, dest_ip, 80);
         return free_fd;
     }
+    // --- YENİ: FIFO Boru Yönlendiricisi ---
+    if (strncmp(ext, "FIFO", 4) == 0) {
+        int p_id = -1;
+        // 1. Bu isimde açık bir boru var mı? (Başka bir uygulama açmış olabilir)
+        for (int i = 0; i < 16; i++) {
+            if (system_pipes[i].active && strncmp(system_pipes[i].name, filename, 8) == 0) {
+                p_id = i; break;
+            }
+        }
+        // 2. Yoksa yeni bir boru yarat
+        if (p_id == -1) {
+            for (int i = 0; i < 16; i++) {
+                if (!system_pipes[i].active) {
+                    system_pipes[i].active = 1;
+                    int k = 0; while (filename[k] && k < 8) { system_pipes[i].name[k] = filename[k]; k++; }
+                    system_pipes[i].name[k] = '\0';
+                    system_pipes[i].head = 0; 
+                    system_pipes[i].tail = 0; 
+                    system_pipes[i].count = 0;
+                    p_id = i; break;
+                }
+            }
+        }
+        if (p_id == -1) return -1; // Boru havuzu dolu
 
+        current_task->fd_table[free_fd].is_open = 1; 
+        current_task->fd_table[free_fd].type = 4; // 4 = FIFO PIPE[cite: 7]
+        current_task->fd_table[free_fd].cluster = p_id; // Boru ID'sini sakla
+        return free_fd;
+    }
     // YENİ ZIRH: Artık sadece ilk 16 dosyayı değil, 32 sektörlük (512 dosyalık) tüm Root Dizinini tarıyoruz!
     for (unsigned int s = 0; s < 32; s++) {
         directory_entry_t root_dir[16]; 
@@ -414,6 +455,22 @@ int vfs_read(int fd, unsigned char* target_buffer, int count) {
             return to_copy;
         }
         return 0; 
+    }
+    // FIFO (Boru) Okuma İşlemi
+    if (file->type == 4) { 
+        int p_id = file->cluster;
+        if (p_id < 0 || p_id >= 16 || !system_pipes[p_id].active) return -1;
+        
+        pipe_t* p = &system_pipes[p_id];
+        int read_bytes = 0;
+        
+        // Boruda veri oldukça ve istenen sayıya ulaşmadıkça oku
+        while (read_bytes < count && p->count > 0) {
+            target_buffer[read_bytes++] = p->buffer[p->tail];
+            p->tail = (p->tail + 1) % 512; // Halkayı çevir
+            p->count--;
+        }
+        return read_bytes; // Okunan byte sayısını dön (Boru boşsa 0 döner)
     }
     
     // GÜÇLENDİRİLMİŞ DİSK OKUMA (ATA 128 Sektör Chunking)
@@ -481,6 +538,22 @@ int vfs_write(int fd, unsigned char* buffer, int count) {
             }
         }
         return -1;
+    }
+    // FIFO (Boru) Yazma İşlemi
+    if (file->type == 4) { 
+        int p_id = file->cluster;
+        if (p_id < 0 || p_id >= 16 || !system_pipes[p_id].active) return -1;
+        
+        pipe_t* p = &system_pipes[p_id];
+        int written = 0;
+        
+        // Boruda yer oldukça (512 bayt sınırı) yaz
+        while (written < count && p->count < 512) {
+            p->buffer[p->head] = buffer[written++];
+            p->head = (p->head + 1) % 512; // Halkayı çevir
+            p->count++;
+        }
+        return written; // Yazılan byte sayısını dön
     }
     
     return -1; // Disk dosyalarına yazma (şimdilik desteklenmiyor)

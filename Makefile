@@ -89,9 +89,16 @@ tarayici.elf: sdk/tarayici.c sdk/libc.o
 hesap.elf: sdk/hesap.c sdk/libc.o
 	$(CC) $(APP_CFLAGS) -c sdk/hesap.c -o sdk/hesap.o
 	ld -m elf_i386 -T sdk/app.ld sdk/hesap.o sdk/libc.o -o hesap.elf
+mesaj.elf: sdk/mesaj.c sdk/libc.o
+	$(CC) $(APP_CFLAGS) -c sdk/mesaj.c -o sdk/mesaj.o
+	ld -m elf_i386 -T sdk/app.ld sdk/mesaj.o sdk/libc.o -o mesaj.elf
+
+kumanda.elf: sdk/kumanda.c sdk/libc.o
+	$(CC) $(APP_CFLAGS) -c sdk/kumanda.c -o sdk/kumanda.o
+	ld -m elf_i386 -T sdk/app.ld sdk/kumanda.o sdk/libc.o -o kumanda.elf
 
 # 4. Aşama: Uygulamaları FAT16 Diske (c.img) Enjekte Etme
-disk: yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf edit.elf wm.elf explorer.elf tarayici.elf hesap.elf
+disk: yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf edit.elf wm.elf explorer.elf tarayici.elf hesap.elf mesaj.elf kumanda.elf
 	dd if=/dev/zero of=c.img bs=1024 count=10240
 	mkfs.fat -F 16 c.img
 	mcopy -o -i c.img yilan.elf ::/YILAN.ELF
@@ -107,7 +114,10 @@ disk: yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf
 	mcopy -o -i c.img tarayici.elf ::/TARAYICI.ELF
 	mcopy -o -i c.img arka.bmp ::/ARKA.BMP
 	mcopy -o -i c.img hesap.elf ::/HESAP.ELF
+	mcopy -o -i c.img mesaj.elf ::/MESAJ.ELF
+	mcopy -o -i c.img kumanda.elf ::/KUMANDA.ELF
 	sync
+	sleep 1
 
 # 5. Aşama: QEMU'yu başlat (Başlamadan önce ISO ve disk otomatik güncellenir)
 run: $(ISO_TARGET) disk
@@ -115,5 +125,5 @@ run: $(ISO_TARGET) disk
 
 # Temizlik
 clean:
-	rm -f src/*.o sdk/*.o $(TARGET) $(ISO_TARGET) yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf edit.elf wm.elf explorer.elf tarayici.elf hesap.elf
+	rm -f src/*.o sdk/*.o $(TARGET) $(ISO_TARGET) yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf edit.elf wm.elf explorer.elf tarayici.elf hesap.elf mesaj.elf kumanda.elf
 	rm -rf isodir

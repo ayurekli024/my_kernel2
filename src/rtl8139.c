@@ -29,7 +29,7 @@ void rtl8139_send_arp(void);
 // YENİ: TCP SOKET YÖNETİCİSİ (MAX 16 EŞZAMANLI BAĞLANTI)
 // =========================================================
 
-tcp_socket_t tcp_sockets[16];
+tcp_socket_t tcp_sockets[16] = {0}; // = {0} ekleyerek tüm soketleri kesin olarak sıfırla!
 unsigned short next_local_port = 55556;
 
 int net_socket_create() {

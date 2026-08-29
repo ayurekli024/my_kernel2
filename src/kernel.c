@@ -217,24 +217,12 @@ extern void kill_task_by_id(int task_id);
 void background_task() { while(1) { __asm__ __volatile__("sti"); task1_counter++; yield(); } }
 
 int api_exec_app(const char* name, const char* args) {
-    char raw_name[16];
-    int i = 0;
-    while(name[i] != '\0' && name[i] != '.' && i < 15) { raw_name[i] = name[i]; i++; }
-    raw_name[i] = '\0';
-    
-    char ext[4] = "ELF";
-    int len = strlen(name);
-    if (len > 4 && (name[len-1] == 'n' || name[len-1] == 'N')) strcpy(ext, "BIN");
-
-    char fat_name[9] = "        "; 
-    for(int j = 0; j < 8 && raw_name[j] != '\0'; j++) {
-        fat_name[j] = raw_name[j];
-        if(fat_name[j] >= 'a' && fat_name[j] <= 'z') fat_name[j] -= 32;
-    }
-    fat_name[8] = '\0';
-
     extern unsigned char elf_load_buffer[];
-    int file_size = ardaos_read_file(fat_name, ext, elf_load_buffer);
+    
+    // EFSANE ZIRH: Artık metni kırmak veya parçalamak yok!
+    // Tam yolu (SISTEM/YILAN.ELF) doğrudan gönderiyoruz. 
+    // Eğer uzantı yoksa diye "ELF" yedek parametresini veriyoruz, gerisini disk.c'deki zeki Path Parser hallediyor!
+    int file_size = ardaos_read_file(name, "ELF", elf_load_buffer);
     
     if (file_size > 0) {
         extern void* malloc(unsigned int);

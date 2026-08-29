@@ -20,7 +20,7 @@ typedef struct {
 } pipe_t;
 
 pipe_t system_pipes[16] = {0}; // = {0} ekleyerek tüm belleği kesin olarak sıfırla!
-
+int fat16_find_entry(const char* full_path, directory_entry_t* out_entry); // YENİ EKLENEN PROTOTİP
 
 static unsigned int cluster_to_lba(unsigned short cluster);
 static int parse_path_node(const char** path, char* name_8, char* ext_3);
@@ -104,21 +104,50 @@ static void dbg_print_term(const char* prefix, int value) {
 }
 
 int ardaos_read_file(const char* filename, const char* ext, unsigned char* target_buffer) {
-    directory_entry_t root_dir[16]; 
-    ata_lba_read(root_dir_start_lba, 1, (unsigned short*)root_dir);
-    for (int i = 0; i < 16; i++) {
-        if (root_dir[i].name[0] == 0 || root_dir[i].name[0] == (char)0xE5) continue; 
-        if (strncmp(root_dir[i].name, filename, 8) == 0 && strncmp(root_dir[i].ext, ext, 3) == 0) {
-            unsigned int actual_lba = data_start_lba + ((root_dir[i].cluster - 2) * bpb.sectors_per_cluster);
-            if (actual_lba < data_start_lba) return -1; 
-            
-            // Eğer dosya bir şekilde 0 bayt kalmışsa bile, okuma esnasında kilidi engelle!
-            unsigned int sectors_to_read = (root_dir[i].size == 0) ? 1 : ((root_dir[i].size + 511) / 512);
-            ata_lba_read(actual_lba, sectors_to_read, (unsigned short*)target_buffer);
-            return root_dir[i].size; 
+    char full_path[64];
+    int p = 0;
+    int has_dot = 0;
+    
+    // Gelen ismin içinde zaten bir uzantı (Nokta) var mı kontrol et
+    if (filename != 0) {
+        for(int k = 0; k < 60 && filename[k] != ' ' && filename[k] != '\0'; k++) {
+            full_path[p++] = filename[k];
+            if (filename[k] == '.') has_dot = 1;
         }
     }
-    return -1; 
+    
+    // Eğer isimde nokta yoksa, Kernel'in gönderdiği "ELF" gibi uzantıları ekle
+    if (!has_dot && ext != 0 && ext[0] != ' ' && ext[0] != '\0') {
+        full_path[p++] = '.';
+        for(int k = 0; k < 3 && ext[k] != ' ' && ext[k] != '\0'; k++) {
+            full_path[p++] = ext[k];
+        }
+    }
+    full_path[p] = '\0';
+
+    directory_entry_t entry;
+    
+    // Yeni Hiyerarşik Arama Motorumuzu kullan!
+    if (fat16_find_entry(full_path, &entry) == 0) {
+        if (entry.attr & 0x10) return -1; // Klasörler çalıştırılamaz
+        
+        unsigned int actual_lba = cluster_to_lba(entry.cluster);
+        unsigned int sectors_to_read = (entry.size == 0) ? 1 : ((entry.size + 511) / 512);
+        
+        unsigned int current_lba = actual_lba;
+        unsigned short* dest_ptr = (unsigned short*)target_buffer;
+        
+        // Devasa uygulamaları (ELF) donanımı kitlemeden 128 sektörlük parçalarla (Chunking) RAM'e yükle
+        while (sectors_to_read > 0) {
+            unsigned char chunk = (sectors_to_read > 128) ? 128 : sectors_to_read;
+            ata_lba_read(current_lba, chunk, dest_ptr);
+            current_lba += chunk;
+            dest_ptr += (chunk * 256);
+            sectors_to_read -= chunk;
+        }
+        return entry.size; 
+    }
+    return -1; // Uygulama bulunamadı
 }
 
 int ardaos_write_file(const char* filename, const char* ext, unsigned int size, unsigned char* source_buffer) {
@@ -545,21 +574,21 @@ int vfs_open(const char* filename, const char* ext) {
         current_task->fd_table[free_fd].cluster = p_id; // Boru ID'sini sakla
         return free_fd;
     }
-// =========================================================
+    // =========================================================
     // YENİ: HİYERARŞİK DİSK ARAMA (PATH PARSER ENTEGRASYONU)
     // =========================================================
     char full_path[64];
     int p = 0;
+    int has_dot = 0;
     
-    // Klasik sys_open("ARKA    ", "BMP") çağrılarını "ARKA.BMP" formatına birleştir.
-    // Aynı zamanda "KLASOR/A", "TXT" çağrılarını da "KLASOR/A.TXT" yapar!
     if (filename != 0) {
         for(int k = 0; k < 60 && filename[k] != ' ' && filename[k] != '\0'; k++) {
             full_path[p++] = filename[k];
+            if (filename[k] == '.') has_dot = 1;
         }
     }
     
-    if (ext != 0 && ext[0] != ' ' && ext[0] != '\0') {
+    if (!has_dot && ext != 0 && ext[0] != ' ' && ext[0] != '\0') {
         full_path[p++] = '.';
         for(int k = 0; k < 3 && ext[k] != ' ' && ext[k] != '\0'; k++) {
             full_path[p++] = ext[k];

@@ -90,9 +90,12 @@ void _start(char* args) {
                         strcat(target_file, current_path);
                         strcat(target_file, "/");
                     }
-                    strcat(target_file, &clicked[4]); // Başındaki hizalama boşluklarını atla
                     
-                    // ELF dosyalarını ve uygulamaları çekirdeğe yolla
+                    // ZIRH: İsmin başındaki boşlukları otomatik sayarak atla!
+                    int start_idx = 0;
+                    while (clicked[start_idx] == ' ') start_idx++;
+                    
+                    strcat(target_file, &clicked[start_idx]);
                     sys_exec(target_file, "");
                 }
             }

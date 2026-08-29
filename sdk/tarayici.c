@@ -141,6 +141,6 @@ void _start(char* args) {
             // Kullanıcıya kopyalandığını hissettirmek için ekrana kısa bir bilgi bas
             sys_set_window_text("\n\n[ BILGI ] Web sayfasi basariyla Panoya KOPYALANDI!\n\nTerminale gecip 'pano' yazarak yapistirabilirsiniz.");
         }
-        sys_yield();
+        sys_sleep(10);
     }
 }

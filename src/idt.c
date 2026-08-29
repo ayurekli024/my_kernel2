@@ -557,6 +557,12 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         }
         return -1;
     }
+    // API No 43: sys_sleep (Görevi Uyut)
+    else if (sys_num == 43) {
+        extern void sleep_task(unsigned int ms);
+        sleep_task(arg1);
+        return 1;
+    }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
     return -1;
 }

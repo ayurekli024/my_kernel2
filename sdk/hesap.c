@@ -80,6 +80,6 @@ void _start(char* args) {
                 state = 0;
             }
         }
-        sys_yield(); // Çekirdeği yormadan tetikte bekle
+        sys_sleep(10); // Çekirdeği yormadan tetikte bekle
     }
 }

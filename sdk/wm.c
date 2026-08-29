@@ -552,6 +552,6 @@ void _start(char* args) {
         process_mouse_events();
         render_gui();
         
-        sys_yield();
+        sys_sleep(10);
     }
 }

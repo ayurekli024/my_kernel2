@@ -55,8 +55,10 @@ typedef struct task {
     int state;   
     unsigned int cpu_ticks; 
     unsigned int cpu_usage;
-    unsigned int v_heap_end; // YENİ: Uygulamanın Dinamik Sanal Hafıza Sınırı (sbrk için)
+    unsigned int v_heap_end; 
     file_obj_t fd_table[MAX_FD_PER_TASK];
+    
+    unsigned int sleep_ticks; // YENİ: Görevin uykuda kalacağı tick süresi
 } task_t;
 
 extern task_t* current_task;

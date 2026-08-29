@@ -251,6 +251,6 @@ void _start() {
             }
         }
         
-        sys_yield(); 
+        sys_sleep(10);
     }
 }

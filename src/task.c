@@ -20,7 +20,7 @@ void init_tasking() {
     
     current_task->cpu_ticks = 0; 
     current_task->cpu_usage = 0; 
-
+    current_task->sleep_ticks = 0;
     // ==========================================
     // YENİ EKLENEN KISIM: KERNEL HAFIZA HARİTASI
     // ==========================================
@@ -38,10 +38,10 @@ int create_task(void (*func)(void), unsigned int app_base, char* args) {
     for(unsigned int i = 0; i < sizeof(task_t); i++) p[i] = 0;
     new_task->id = next_pid++;
     new_task->app_base = app_base; 
-    // init_tasking() ve create_task() içindeki atamaların arasına ekle:
     new_task->cpu_ticks = 0;
     new_task->cpu_usage = 0;
-    new_task->state = 0; // Yeni görev varsayılan olarak "Çalışabilir" başlar
+    new_task->sleep_ticks = 0; // YENİ EKLENDİ
+    new_task->state = 0;
     // YENİ: Dinamik hafıza (Heap) tam 0x410000 adresinden başlayacak!
     new_task->v_heap_end = 0x410000;
     // YENİ ZIRH: Stack boyutu 4KB'dan 8KB'a çıkarıldı! 
@@ -314,4 +314,15 @@ unsigned int sys_sbrk(int increment) {
     
     current_task->v_heap_end = new_break;
     return old_break; // Uygulamaya kullanabileceği güvenli başlangıç adresini döndür
+}
+// YENİ: Görevi belirtilen milisaniye kadar dondurur
+void sleep_task(unsigned int ms) {
+    if (current_task == 0) return;
+    // PIT frekansımız 100 Hz (Saniyede 100 vuruş). Her tick = 10 ms.
+    unsigned int ticks = ms / 10;
+    if (ticks == 0) ticks = 1; // En az 1 tick (10ms) uyu
+
+    current_task->sleep_ticks = ticks;
+    current_task->state = 1; // DURUM: 1 (BLOCKED / UYKUDA)
+    yield(); // İşlemciyi anında sıradaki göreve devret!
 }

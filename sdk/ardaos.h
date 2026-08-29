@@ -197,4 +197,7 @@ static inline int sys_list_dir(const char* path, char* buffer) {
 static inline void sys_clear_gui(void) {
     __asm__ __volatile__ ("int $0x80" : : "a"(41));
 }
+static inline void sys_sleep(unsigned int ms) {
+    __asm__ __volatile__ ("int $0x80" : : "a"(43), "b"(ms));
+}
 #endif

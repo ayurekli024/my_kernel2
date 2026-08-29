@@ -22,4 +22,20 @@ void timer_handler_main() {
     if (current_task != 0) {
         current_task->cpu_ticks++; 
     }
+    
+    // YENİ: Uyku Kuyruğu (Sleep Queue) Kontrolü
+    extern task_t* ready_queue;
+    if (ready_queue != 0) {
+        task_t* curr = ready_queue;
+        do {
+            // Eğer görev uykudaysa (state == 1) sayacını düşür
+            if (curr->state == 1 && curr->sleep_ticks > 0) {
+                curr->sleep_ticks--;
+                if (curr->sleep_ticks == 0) {
+                    curr->state = 0; // Süre bitti, görevi uyandır (RUNNABLE)
+                }
+            }
+            curr = curr->next;
+        } while (curr != ready_queue);
+    }
 }

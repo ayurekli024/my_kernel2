@@ -374,6 +374,7 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     extern void init_rtl8139(void);
     init_rtl8139();
     
+    
     // GUI Hafızasını Temizle ve Başlat
     for (int i = 0; i < sizeof(gui_state_t); i++) ((char*)gui)[i] = 0;
     
@@ -393,7 +394,15 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     
     terminal_print("ArdaOS V1.1 Multitasking'e Hos Geldiniz!");
     __asm__ __volatile__ ("sti");
+    extern void init_sb16(void);
+    init_sb16();
+    // YENİ: SB16'yı Terminal hazır olduktan sonra başlat!
+    extern void init_sb16(void);
+    init_sb16();
     
+    // Açılış sesini DMA motoruna gönder!
+    extern void sb16_play_file(void);
+    sb16_play_file();
     // İşletim sistemi ayağa kalktığında ilk iş WM.ELF (Arayüz) ve SHELL.ELF (Terminal) başlar!
     api_exec_app("wm.elf", "");
     api_exec_app("shell.elf", "");

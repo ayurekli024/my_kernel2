@@ -113,6 +113,7 @@ disk: yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf
 	mcopy -o -i c.img explorer.elf ::/EXPLORER.ELF
 	mcopy -o -i c.img tarayici.elf ::/TARAYICI.ELF
 	mcopy -o -i c.img arka.bmp ::/ARKA.BMP
+	mcopy -i c.img -o SES.WAV ::/
 	mcopy -o -i c.img hesap.elf ::/HESAP.ELF
 	mcopy -o -i c.img mesaj.elf ::/MESAJ.ELF
 	mcopy -o -i c.img kumanda.elf ::/KUMANDA.ELF
@@ -121,7 +122,7 @@ disk: yilan.elf okuyucu.elf bomba.elf kedi.elf daktilo.elf istemci.elf shell.elf
 
 # 5. Aşama: QEMU'yu başlat (Başlamadan önce ISO ve disk otomatik güncellenir)
 run: $(ISO_TARGET) disk
-	qemu-system-i386 -audiodev pa,id=snd0 -machine pcspk-audiodev=snd0 -cdrom myos.iso -netdev user,id=net0 -device rtl8139,netdev=net0 -drive file=c.img,format=raw -boot d
+	qemu-system-i386 -audiodev pa,id=snd0 -device sb16,audiodev=snd0 -machine pcspk-audiodev=snd0 -cdrom myos.iso -netdev user,id=net0 -device rtl8139,netdev=net0 -drive file=c.img,format=raw -boot d
 
 # Temizlik
 clean:

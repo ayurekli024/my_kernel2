@@ -37,6 +37,7 @@ extern kernel_main
 extern keyboard_handler_main 
 extern update_tss_esp0       ; YENİ: TSS güncelleyici C fonksiyonumuz
 
+
 _start:
     ; Yığın alanını ayarla
     mov esp, stack_top
@@ -247,6 +248,14 @@ mouse_handler:
     popa
     iretd
 
+
+global sb16_handler
+extern sb16_handler_main
+sb16_handler:
+    pusha
+    call sb16_handler_main
+    popa
+    iret
 ; --- GDT HARİTA YÜKLEYİCİSİ ---
 global gdt_flush
 gdt_flush:

@@ -27,9 +27,9 @@ void pic_remap(void) {
     
     // --- GERÇEK DONANIMSAL İZOLASYON ---
     
-    // MASTER PIC: Sadece Klavye (Bit 1) ve Slave Bağlantısı (Bit 2) "0" (AÇIK)
-    // Diğer her şey "1" (KAPALI/MASKELİ). İkili: 11111001 = 0xF9
-    outb(0x21, 0xF9); 
+    // MASTER PIC: Klavye (Bit 1), Slave (Bit 2) ve YENİ: Ses Kartı IRQ5 (Bit 5) AÇIK
+    // İkili: 11011001 = 0xD9
+    outb(0x21, 0xD9);
     
     // SLAVE PIC: Fare (Bit 4) ve Ağ Kartı IRQ11 (Bit 3) AÇIK 
     // İkili: 11100111 = 0xE7
@@ -161,6 +161,9 @@ void init_idt(void) {
     idt_set_gate(32, (unsigned long)timer_handler, 0x08, 0x8E);
     // Kendi yazdığımız donanım sürücüleri
     idt_set_gate(33, (unsigned long)keyboard_handler, 0x08, 0x8E);
+    // YENİ: Sound Blaster 16 (SB16) için IRQ 5 (INT 37) Kapısı
+    extern void sb16_handler(void);
+    idt_set_gate(37, (unsigned long)sb16_handler, 0x08, 0x8E);
     idt_set_gate(44, (unsigned long)mouse_handler, 0x08, 0x8E);
     // YENİ: Ağ Kartı (RTL8139) için IRQ 11 (INT 43) Kapısı
     extern void rtl8139_handler(void);

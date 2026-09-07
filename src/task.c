@@ -209,36 +209,77 @@ void map_vaddr_to_paddr(unsigned int* page_dir, unsigned int vaddr, unsigned int
 }
 
 // =========================================================================
-// 2. ZIRH: AKILLI ELF YÜKLEYİCİ (Fiziksel RAM'e yazar, Sanal RAM'e bağlar)
+// KUSURSUZ AKILLI ELF YÜKLEYİCİ & DYNAMIC LINKER (.SO DESTEĞİ)
 // =========================================================================
-// =========================================================================
-// KUSURSUZ AKILLI ELF YÜKLEYİCİ (Doğru Segment & Sayfa Eşleme)
-// =========================================================================
+
+// Global Hafıza: Ortak kütüphane fiziksel RAM'de sadece 1 kez tutulacak!
+unsigned char* shared_libc_phys = 0;
+unsigned int shared_libc_size = 0;
+
 unsigned int load_elf_segments(unsigned char* elf_data, unsigned int* page_dir, unsigned char* phys_base) {
     elf32_ehdr_t* header = (elf32_ehdr_t*)elf_data;
-    if (header->e_ident[0] != 0x7F) return 0; // ELF değilse çık
+    if (header->e_ident[0] != 0x7F) return 0; 
+    
+    unsigned int strtab_offset = 0;
     
     elf32_phdr_t* phdr = (elf32_phdr_t*)(elf_data + header->e_phoff);
     for (int i = 0; i < header->e_phnum; i++) {
-        if (phdr[i].p_type == 1) { // PT_LOAD (Yüklenebilir Segment)
+        if (phdr[i].p_type == 1) { // 1 = PT_LOAD (Normal Kod/Veri Segmenti)
             unsigned int vaddr = phdr[i].p_vaddr;
             unsigned int memsz = phdr[i].p_memsz;
             unsigned int filesz = phdr[i].p_filesz;
             unsigned int offset = phdr[i].p_offset;
             
-            // 1. Segment verisini fiziksel RAM'e doğru konuma kopyala
             unsigned char* dest = phys_base + (vaddr & 0xFFF);
             unsigned char* src = elf_data + offset;
             for (unsigned int j = 0; j < filesz; j++) dest[j] = src[j];
             for (unsigned int j = filesz; j < memsz; j++) dest[j] = 0;
             
-            // 2. MMU İLLÜZYONU: Fiziksel RAM sayfalarını uygulamanın beklediği Sanal Adrese bağla!
             unsigned int page_start = vaddr & 0xFFFFF000;
             unsigned int page_end = (vaddr + memsz + 4095) & 0xFFFFF000;
             for (unsigned int cur_v = page_start; cur_v < page_end; cur_v += 4096) {
                 unsigned int diff = cur_v - page_start;
                 unsigned int paddr = (unsigned int)phys_base + diff;
+                extern void map_vaddr_to_paddr(unsigned int*, unsigned int, unsigned int);
                 map_vaddr_to_paddr(page_dir, cur_v, paddr);
+            }
+        }
+        else if (phdr[i].p_type == 2) { // 2 = PT_DYNAMIC (Ortak Kütüphane İsteği)
+            elf32_dyn_t* dyn_table = (elf32_dyn_t*)(elf_data + phdr[i].p_offset);
+            
+            int d = 0;
+            while (dyn_table[d].d_tag != 0) { // DT_NEEDED tespiti
+                if (dyn_table[d].d_tag == 1) { 
+                    extern void terminal_print(const char*);
+                    terminal_print("[ KERNEL ] Uygulama ortak kutuphane (LIBC.SO) talep etti.");
+                    
+                    // 1. ADIM: Kütüphane RAM'de yoksa, DİSKTEN SADECE 1 KEZ OKU!
+                    if (shared_libc_phys == 0) {
+                        terminal_print("[ KERNEL ] LIBC.SO ilk kez yukleniyor... Fiziksel RAM'e aliniyor.");
+                        extern void* malloc(unsigned int);
+                        // Kütüphane için 64KB yer ayır ve Sayfa (4096) hizalaması yap
+                        unsigned char* raw_mem = (unsigned char*)malloc(65536 + 4096);
+                        shared_libc_phys = (unsigned char*)(((unsigned int)raw_mem + 4095) & 0xFFFFF000);
+                        
+                        extern int ardaos_read_file(const char*, const char*, unsigned char*);
+                        int sz = ardaos_read_file("LIBC", "SO", shared_libc_phys);
+                        
+                        if (sz > 0) {
+                            shared_libc_size = sz;
+                        } else {
+                            terminal_print("[ HATA ] LIBC.SO diskte bulunamadi!");
+                        }
+                    }
+                    
+                    // 2. ADIM: Kütüphane RAM'deyse, UYGULAMANIN SANAL BELLEĞİNE (0x60000000) BAĞLA!
+                    if (shared_libc_size > 0) {
+                        extern void map_shared_library(unsigned int*, unsigned int, unsigned int, unsigned int);
+                        // Hangi uygulama açılırsa açılsın, LIBC.SO her zaman 0x60000000 adresindemiş gibi davranacak!
+                        map_shared_library(page_dir, 0x60000000, (unsigned int)shared_libc_phys, shared_libc_size);
+                        terminal_print("[ KERNEL ] MMU Illuzyonu basarili: LIBC.SO sanal bellege kopyalanmadan baglandi!");
+                    }
+                }
+                d++;
             }
         }
     }

@@ -224,3 +224,22 @@ void* alloc_user_page() {
     user_phys_memory += 4096; // Her istekte 4KB (1 Sayfa) ver
     return ptr;
 }
+// ============================================================================
+// YENİ: PAYLAŞILAN KÜTÜPHANE (SHARED OBJECT) HARİTALAMA MOTORU
+// ============================================================================
+// task.c içindeki sayfa haritalama motorunu (MMU) bu dosyaya tanıtıyoruz:
+extern void map_vaddr_to_paddr(unsigned int* page_dir, unsigned int vaddr, unsigned int paddr);
+
+// Fiziksel RAM'de sadece 1 kez bulunan bir kütüphaneyi (.SO),
+// Sınırsız sayıda uygulamanın sanal belleğine bağlar (MMU İllüzyonu).
+void map_shared_library(unsigned int* page_dir, unsigned int vaddr, unsigned int paddr, unsigned int size) {
+    unsigned int start_page = vaddr & 0xFFFFF000;
+    unsigned int end_page = (vaddr + size + 4095) & 0xFFFFF000;
+    unsigned int current_paddr = paddr & 0xFFFFF000;
+    
+    for (unsigned int cur_v = start_page; cur_v < end_page; cur_v += 4096) {
+        // İlgili fiziksel sayfayı, uygulamanın (CR3) özel haritasına ekle
+        map_vaddr_to_paddr(page_dir, cur_v, current_paddr);
+        current_paddr += 4096;
+    }
+}

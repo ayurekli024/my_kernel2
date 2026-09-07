@@ -29,6 +29,25 @@ typedef struct {
     unsigned int p_flags;
     unsigned int p_align;
 } elf32_phdr_t;
+// YENİ: ELF Dinamik Bağlama (Shared Object) Yapıları
+typedef struct {
+    int d_tag;           // Bloğun Tipi (Örn: 1 = DT_NEEDED, 5 = DT_STRTAB)
+    unsigned int d_val;  // Değer veya Adres
+} elf32_dyn_t;
+
+typedef struct {
+    unsigned int st_name;
+    unsigned int st_value;
+    unsigned int st_size;
+    unsigned char st_info;
+    unsigned char st_other;
+    unsigned short st_shndx;
+} elf32_sym_t;
+
+typedef struct {
+    unsigned int r_offset;
+    unsigned int r_info;
+} elf32_rel_t;
 // YENİ: VFS İçin Dosya Nesnesi (File Object)
 typedef struct {
     int is_open;          // Dosya açık mı?

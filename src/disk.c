@@ -150,131 +150,119 @@ int ardaos_read_file(const char* filename, const char* ext, unsigned char* targe
     return -1; // Uygulama bulunamadı
 }
 
+// 2. ardaos_write_file FONKSİYONUNU TÜM KÖK DİZİNİ TARAYACAK ŞEKİLDE DEĞİŞTİRİN
 int ardaos_write_file(const char* filename, const char* ext, unsigned int size, unsigned char* source_buffer) {
-    // DONANIM ZIRHI 3: Herhangi bir hata sonucu boyut 0 gelirse, 0 Baytlık dosya oluşmasını engelle!
-    if (size == 0 || size > 10240) { 
-        size = 512; 
-    }
+    if (size == 0 || size > 10240) size = 512; 
     
-    directory_entry_t root_dir[16];
-    ata_lba_read(root_dir_start_lba, 1, (unsigned short*)root_dir);
-    
+    unsigned int root_sectors = (bpb.dir_entries * 32) / 512;
+    if (root_sectors == 0) root_sectors = 32;
+
+    directory_entry_t dir[16];
+    int target_sec = -1;
     int target_slot = -1;
     int target_cluster = -1;
     
-    for (int i = 0; i < 16; i++) {
-        if (strncmp(root_dir[i].name, filename, 8) == 0 && strncmp(root_dir[i].ext, ext, 3) == 0) {
-            target_slot = i;
-            target_cluster = root_dir[i].cluster;
-            if (target_cluster < 2) { target_cluster = -1; }
-            break;
-        }
-    }
-    dbg_print_term("Found slot:", target_slot);
-    dbg_print_term("Found cluster:", target_cluster);
-    
-    if (target_slot == -1) {
+    // 1. Dosya var mı kontrol et
+    for (unsigned int s = 0; s < root_sectors; s++) {
+        ata_lba_read(root_dir_start_lba + s, 1, (unsigned short*)dir);
         for (int i = 0; i < 16; i++) {
-            if (root_dir[i].name[0] == 0x00 || root_dir[i].name[0] == (char)0xE5) {
-                target_slot = i; break;
-            }
-        }
-        if (target_slot == -1) return -1; 
-    }
-
-    if (target_cluster == -1) {
-        unsigned short fat_table[256];
-        unsigned int fat_lba = bpb.reserved_sectors;
-        ata_lba_read(fat_lba, 1, fat_table);
-        for (int i = 2; i < 256; i++) { 
-            if (fat_table[i] == 0x0000) {
-                target_cluster = i;
-                fat_table[i] = 0xFFFF; 
+            if (dir[i].name[0] == 0x00) break;
+            if (dir[i].name[0] == (char)0xE5) continue;
+            if (strncmp(dir[i].name, filename, 8) == 0 && strncmp(dir[i].ext, ext, 3) == 0) {
+                target_sec = s; target_slot = i; target_cluster = dir[i].cluster;
+                if (target_cluster < 2) target_cluster = -1;
                 break;
             }
         }
-        if (target_cluster == -1) return -1; 
-        ata_lba_write(fat_lba, 1, fat_table); 
-        if (bpb.fat_count > 1) ata_lba_write(fat_lba + bpb.sectors_per_fat, 1, fat_table);
-        
-        for(int i=0; i<8; i++) root_dir[target_slot].name[i] = filename[i];
-        for(int i=0; i<3; i++) root_dir[target_slot].ext[i] = ext[i];
-        root_dir[target_slot].attr = 0x00;
-        root_dir[target_slot].cluster = target_cluster;
-        root_dir[target_slot].size = 0;  // Yeni dosya başlangıçta 0 bayt
-        root_dir[target_slot].time = 0;
-        root_dir[target_slot].date = 0;
-        dbg_print_term("Allocated cluster:", target_cluster);
+        if (target_slot != -1) break;
     }
     
-    // Veri yazılacak LBA'yı hesapla (SADECE cluster valid olduktan sonra)
+    // 2. Yoksa boş bir yuva bul
+    if (target_slot == -1) {
+        for (unsigned int s = 0; s < root_sectors; s++) {
+            ata_lba_read(root_dir_start_lba + s, 1, (unsigned short*)dir);
+            for (int i = 0; i < 16; i++) {
+                if (dir[i].name[0] == 0x00 || dir[i].name[0] == (char)0xE5) {
+                    target_sec = s; target_slot = i; break;
+                }
+            }
+            if (target_slot != -1) break;
+        }
+    }
+    if (target_slot == -1) return -1;
+
+    ata_lba_read(root_dir_start_lba + target_sec, 1, (unsigned short*)dir);
+
+    // 3. Cluster tahsisi
+    if (target_cluster == -1) {
+        unsigned short fat_table[256];
+        unsigned int fat_lba = bpb.reserved_sectors;
+        unsigned int fat_sectors = bpb.sectors_per_fat;
+        int found_cluster = -1;
+
+        for (unsigned int fs = 0; fs < fat_sectors; fs++) {
+            ata_lba_read(fat_lba + fs, 1, fat_table);
+            int start_c = (fs == 0) ? 2 : 0;
+            for (int i = start_c; i < 256; i++) {
+                if (fat_table[i] == 0x0000) {
+                    found_cluster = (fs * 256) + i;
+                    fat_table[i] = 0xFFFF;
+                    ata_lba_write(fat_lba + fs, 1, fat_table);
+                    if (bpb.fat_count > 1) ata_lba_write(fat_lba + bpb.sectors_per_fat + fs, 1, fat_table);
+                    break;
+                }
+            }
+            if (found_cluster != -1) break;
+        }
+        if (found_cluster == -1) return -1;
+        target_cluster = found_cluster;
+
+        for(int i = 0; i < 8; i++) dir[target_slot].name[i] = filename[i];
+        for(int i = 0; i < 3; i++) dir[target_slot].ext[i] = ext[i];
+        dir[target_slot].attr = 0x00;
+        dir[target_slot].cluster = target_cluster;
+        dir[target_slot].size = 0;
+        dir[target_slot].time = 0;
+        dir[target_slot].date = 0;
+    }
+
     unsigned int actual_lba = data_start_lba + ((target_cluster - 2) * bpb.sectors_per_cluster);
-    if (actual_lba <= root_dir_start_lba || target_cluster < 2) { 
-        return -1; 
-    }
-    
-    // 1. ADIM: Veri hemen diske yaz
+    if (actual_lba <= root_dir_start_lba || target_cluster < 2) return -1;
+
     unsigned int sectors_to_write = (size + 511) / 512;
-    if (sectors_to_write == 0) sectors_to_write = 1; // En az 1 sektör yaz
-    dbg_print_term("Writing LBA:", actual_lba);
-    dbg_print_term("Sectors:", sectors_to_write);
+    if (sectors_to_write == 0) sectors_to_write = 1;
     ata_lba_write(actual_lba, sectors_to_write, (unsigned short*)source_buffer);
-    api_print("ata_lba_write called");
 
-    // Veri yazma sonrası hemen okuma ile doğrulama
-    unsigned short verify_sector[256];
-    ata_lba_read(actual_lba, 1, verify_sector);
-    int nonzero = 0;
-    for (int vi = 0; vi < 256; vi++) {
-        if (verify_sector[vi] != 0) { nonzero = 1; break; }
-    }
-    if (nonzero) {
-        api_print("DATA VERIFY: nonzero");
-    } else {
-        api_print("DATA VERIFY: all zero");
-    }
-    
-    // 2. ADIM: Veri yazıldıktan sonra directory size'ını ayarla ve disk'e yaz
-    root_dir[target_slot].size = size;
-    ata_lba_write(root_dir_start_lba, 1, (unsigned short*)root_dir);
-
-    // Doğrulama: directory'yi tekrar oku ve yazılan size'ı kontrol et
-    directory_entry_t verify_dir[16];
-    ata_lba_read(root_dir_start_lba, 1, (unsigned short*)verify_dir);
-    if (verify_dir[target_slot].size != size) {
-        char msg[64];
-        itoa(verify_dir[target_slot].size, msg);
-        api_print("VERIFY SIZE:");
-        api_print(msg);
-    } else {
-        api_print("VERIFY OK: size matches");
-    }
-    
-    return 0; 
+    dir[target_slot].size = size;
+    ata_lba_write(root_dir_start_lba + target_sec, 1, (unsigned short*)dir);
+    return 0;
 }
 
 void ardaos_list_files(char* output_buffer) {
-    directory_entry_t root_dir[16];
-    ata_lba_read(root_dir_start_lba, 1, (unsigned short*)root_dir); 
+    unsigned int root_sectors = (bpb.dir_entries * 32) / 512;
+    if (root_sectors == 0) root_sectors = 32;
+
+    directory_entry_t dir[16];
     strcpy(output_buffer, "=== FAT16 DISK ICERIGI ===\n");
     int found = 0;
-    for (int i = 0; i < 16; i++) {
-        if (root_dir[i].name[0] != 0 && root_dir[i].name[0] != (char)0xE5) {
-            if (root_dir[i].attr == 0x0F || (root_dir[i].attr == 0x08)) continue;
+    
+    for (unsigned int s = 0; s < root_sectors; s++) {
+        ata_lba_read(root_dir_start_lba + s, 1, (unsigned short*)dir);
+        for (int i = 0; i < 16; i++) {
+            if (dir[i].name[0] == 0) return;
+            if (dir[i].name[0] == (char)0xE5 || dir[i].attr == 0x0F || dir[i].attr == 0x08) continue;
             found++;
             char temp_name[9]; char temp_ext[4];
-            for(int j=0; j<8; j++) temp_name[j] = root_dir[i].name[j];
-            for(int j=0; j<3; j++) temp_ext[j] = root_dir[i].ext[j];
+            for(int j = 0; j < 8; j++) temp_name[j] = dir[i].name[j];
+            for(int j = 0; j < 3; j++) temp_ext[j] = dir[i].ext[j];
             temp_name[8] = '\0'; temp_ext[3] = '\0';
             
             strcat(output_buffer, "- "); strcat(output_buffer, temp_name);
-            
-            // YENİ: Dizin ise [KLASOR] yazdır, değilse boyutunu yazdır
-            if (root_dir[i].attr & 0x10) {
+            if (dir[i].attr & 0x10) {
                 strcat(output_buffer, "   [KLASOR]\n");
             } else {
                 strcat(output_buffer, "."); strcat(output_buffer, temp_ext);
-                char size_str[16]; itoa(root_dir[i].size, size_str);
+                char size_str[16]; itoa(dir[i].size, size_str);
                 strcat(output_buffer, "   ("); strcat(output_buffer, size_str); strcat(output_buffer, " Bayt)\n");
             }
         }
@@ -284,49 +272,48 @@ void ardaos_list_files(char* output_buffer) {
 // ==========================================================
 // FAT16 DOSYA SİLME MOTORU (0xE5 Sihri ve Zincir Kırma)
 // ==========================================================
+// 4. ardaos_delete_file FONKSİYONUNU TÜM SEKTÖRLERİ GEZECEK ŞEKİLDE GÜNCELLEYİN
 int ardaos_delete_file(const char* filename, const char* ext) {
-    directory_entry_t root_dir[16];
-    ata_lba_read(root_dir_start_lba, 1, (unsigned short*)root_dir);
+    unsigned int root_sectors = (bpb.dir_entries * 32) / 512;
+    if (root_sectors == 0) root_sectors = 32;
 
+    directory_entry_t dir[16];
+    int target_sec = -1;
     int target_slot = -1;
     unsigned short target_cluster = 0;
 
-    // 1. Dosyayı Root Directory'de Bul
-    for (int i = 0; i < 16; i++) {
-        if (root_dir[i].name[0] == 0x00 || root_dir[i].name[0] == (char)0xE5) continue;
-        if (strncmp(root_dir[i].name, filename, 8) == 0 && strncmp(root_dir[i].ext, ext, 3) == 0) {
-            target_slot = i;
-            target_cluster = root_dir[i].cluster;
-            break;
+    for (unsigned int s = 0; s < root_sectors; s++) {
+        ata_lba_read(root_dir_start_lba + s, 1, (unsigned short*)dir);
+        for (int i = 0; i < 16; i++) {
+            if (dir[i].name[0] == 0x00) break;
+            if (dir[i].name[0] == (char)0xE5) continue;
+            if (strncmp(dir[i].name, filename, 8) == 0 && strncmp(dir[i].ext, ext, 3) == 0) {
+                target_sec = s; target_slot = i; target_cluster = dir[i].cluster; break;
+            }
         }
+        if (target_slot != -1) break;
     }
+    if (target_slot == -1) return -1;
 
-    if (target_slot == -1) return -1; // Dosya bulunamadı
+    ata_lba_read(root_dir_start_lba + target_sec, 1, (unsigned short*)dir);
+    dir[target_slot].name[0] = (char)0xE5;
+    ata_lba_write(root_dir_start_lba + target_sec, 1, (unsigned short*)dir);
 
-    // 2. Dosyanın isminin ilk harfini 0xE5 (Silinmiş) olarak işaretle
-    root_dir[target_slot].name[0] = (char)0xE5;
-    ata_lba_write(root_dir_start_lba, 1, (unsigned short*)root_dir);
-
-    // 3. FAT Tablosundaki Alanları Serbest Bırak (Zinciri Kır)
     if (target_cluster >= 2) {
         unsigned short fat_table[256];
         unsigned int fat_lba = bpb.reserved_sectors;
         ata_lba_read(fat_lba, 1, fat_table);
 
         unsigned short current_cluster = target_cluster;
-        // FAT16 dosya sonu işareti 0xFFF8'den büyüktür
         while (current_cluster >= 2 && current_cluster < 0xFFF8) {
             unsigned short next_cluster = fat_table[current_cluster];
-            fat_table[current_cluster] = 0x0000; // Sektörü boşa çıkar
+            fat_table[current_cluster] = 0x0000;
             current_cluster = next_cluster;
         }
-
         ata_lba_write(fat_lba, 1, fat_table);
-        if (bpb.fat_count > 1) {
-            ata_lba_write(fat_lba + bpb.sectors_per_fat, 1, fat_table);
-        }
+        if (bpb.fat_count > 1) ata_lba_write(fat_lba + bpb.sectors_per_fat, 1, fat_table);
     }
-    return 0; // Başarıyla silindi
+    return 0;
 }
 // ==========================================================
 // EBEVEYN DİZİN ÇÖZÜCÜ (PARENT DIRECTORY RESOLVER)
@@ -612,7 +599,7 @@ int vfs_open(const char* filename, const char* ext) {
     return -1; // Dosya veya Yol (Path) bulunamadı
 }
 
-// 2. sys_read: Bilet numarasına (FD) göre diskten veya cihazdan oku
+// 1. vfs_read İÇİNDEKİ DİSK OKUMA BLOĞUNU DEĞİŞTİRİN
 int vfs_read(int fd, unsigned char* target_buffer, int count) {
     if (current_task == 0 || fd < 0 || fd >= MAX_FD_PER_TASK) return -1;
     if (current_task->fd_table[fd].is_open == 0) return -1; 
@@ -635,11 +622,11 @@ int vfs_read(int fd, unsigned char* target_buffer, int count) {
     }
     if (file->type == 3) {
         extern tcp_socket_t tcp_sockets[];
-        int sock_id = file->cluster; // Soket ID'sini geri çağır
+        int sock_id = file->cluster;
         if (sock_id < 0 || sock_id >= 16 || !tcp_sockets[sock_id].active) return -1;
         
         tcp_socket_t* sock = &tcp_sockets[sock_id];
-        if (sock->state != TCP_ESTABLISHED) return 0; // ESTABLISHED değilse (hala el sıkışıyorsa) bekle
+        if (sock->state != TCP_ESTABLISHED) return 0;
         
         if (sock->rx_ready) {
             int to_copy = count < sock->rx_size ? count : sock->rx_size;
@@ -651,44 +638,50 @@ int vfs_read(int fd, unsigned char* target_buffer, int count) {
         }
         return 0; 
     }
-    // FIFO (Boru) Okuma İşlemi
     if (file->type == 4) { 
         int p_id = file->cluster;
         if (p_id < 0 || p_id >= 16 || !system_pipes[p_id].active) return -1;
         
         pipe_t* p = &system_pipes[p_id];
         int read_bytes = 0;
-        
-        // Boruda veri oldukça ve istenen sayıya ulaşmadıkça oku
         while (read_bytes < count && p->count > 0) {
             target_buffer[read_bytes++] = p->buffer[p->tail];
-            p->tail = (p->tail + 1) % 512; // Halkayı çevir
+            p->tail = (p->tail + 1) % 512;
             p->count--;
         }
-        return read_bytes; // Okunan byte sayısını dön (Boru boşsa 0 döner)
+        return read_bytes;
     }
     
-    // GÜÇLENDİRİLMİŞ DİSK OKUMA (ATA 128 Sektör Chunking)
+    // GÜVENLİ VE BOYUT SINIRLI DİSK OKUMA (Buffer Overflow Koruması)
     if (file->offset >= file->size) return 0; 
     
     int bytes_left = file->size - file->offset;
     if (count > bytes_left) count = bytes_left;
-    
-    unsigned int sectors_to_read = (file->size + 511) / 512;
-    unsigned int current_lba = file->lba_start;
-    unsigned short* dest_ptr = (unsigned short*)target_buffer;
-    
-    // Donanımı boğmamak için devasa dosyaları 64KB (128 sektör) parçalarla çekiyoruz!
-    while (sectors_to_read > 0) {
-        unsigned char chunk = (sectors_to_read > 128) ? 128 : sectors_to_read;
-        ata_lba_read(current_lba, chunk, dest_ptr);
-        current_lba += chunk;
-        dest_ptr += (chunk * 256);
-        sectors_to_read -= chunk;
+    if (count <= 0) return 0;
+
+    int bytes_read = 0;
+    static unsigned short sector_temp[256];
+    unsigned char* byte_temp = (unsigned char*)sector_temp;
+
+    while (bytes_read < count) {
+        unsigned int current_offset = file->offset;
+        unsigned int sector_idx = current_offset / 512;
+        unsigned int offset_in_sec = current_offset % 512;
+        unsigned int cur_lba = file->lba_start + sector_idx;
+
+        ata_lba_read(cur_lba, 1, sector_temp);
+
+        int chunk = 512 - offset_in_sec;
+        if (chunk > (count - bytes_read)) chunk = count - bytes_read;
+
+        for (int i = 0; i < chunk; i++) {
+            target_buffer[bytes_read + i] = byte_temp[offset_in_sec + i];
+        }
+
+        bytes_read += chunk;
+        file->offset += chunk;
     }
-    
-    file->offset += count; 
-    return count; 
+    return bytes_read;
 }
 
 // 3. sys_close: Bileti (FD) iptal et

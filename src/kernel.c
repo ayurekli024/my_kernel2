@@ -125,17 +125,44 @@ int api_poll_key() {
     }
     return 0; 
 }
-
+void terminal_print(const char* text);
 int api_write_file(const char* name, const char* ext, unsigned char* buffer) {
     unsigned int base = current_task->app_base;
-    const char* real_name = (unsigned int)name < 0x100000 ? (const char*)(base + (unsigned int)name) : name;
-    const char* real_ext = (unsigned int)ext < 0x100000 ? (const char*)(base + (unsigned int)ext) : ext;
-    unsigned char* real_buffer = (unsigned int)buffer < 0x100000 ? (unsigned char*)(base + (unsigned int)buffer) : buffer;
     
+    // GÜÇLENDİRİLMİŞ ÇEVİRMEN: Uygulama adreslerini güvenli bir şekilde çekirdek adreslerine çevir
+    // Sadece 1MB (0x100000) altındaki adresleri çevir, eğer adres zaten büyükse dokunma.
+    const char* real_name = ((unsigned int)name < 0x100000) ? (const char*)(base + (unsigned int)name) : name;
+    const char* real_ext = ((unsigned int)ext < 0x100000) ? (const char*)(base + (unsigned int)ext) : ext;
+    unsigned char* real_buffer = ((unsigned int)buffer < 0x100000) ? (unsigned char*)(base + (unsigned int)buffer) : buffer;
+    
+    // Güvenlik duvarı: real_buffer adresinin çekirdeğin kritik alanlarını (0x0 - 0x100000) gösterip göstermediğini kontrol et.
+    // Eğer gösteriyorsa, işlem kilitlenmesini engellemek için işlemi iptal et.
+    if ((unsigned int)real_buffer < 0x100000) {
+        terminal_print("[ KERNEL ] HATA: Uygulama kernel bellegine erismeye calisti!");
+        return -1;
+    }
+
     int actual_size = 0;
     while(real_buffer[actual_size] != '\0' && actual_size < 10240) actual_size++;
-    actual_size++; 
-    return ardaos_write_file(real_name, real_ext, actual_size, real_buffer);
+    if (actual_size == 0) actual_size = 1; 
+    else actual_size++; 
+    
+    char msg[64] = "[ KERNEL ] Boyut: ";
+    char num[16];
+    extern void itoa(int, char*);
+    extern void strcat(char*, const char*);
+    itoa(actual_size, num);
+    strcat(msg, num);
+    terminal_print(msg);
+    
+    int res = ardaos_write_file(real_name, real_ext, actual_size, real_buffer);
+    if (res == 0) {
+        terminal_print("[ KERNEL ] DISK YAZMA KUSURSUZ BASARILI!");
+    } else {
+        terminal_print("[ KERNEL ] HATA: FAT MOTORU ISLEMI IPTAL ETTI (-1)!");
+    }
+    
+    return res;
 }
 
 int api_read_file(const char* name, const char* ext, unsigned char* buffer) {

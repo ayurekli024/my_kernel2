@@ -63,7 +63,7 @@ typedef struct {
     unsigned short local_port;
 } file_obj_t;
 
-#define MAX_FD_PER_TASK 8 // Bir uygulama aynı anda en fazla 8 dosya açabilir
+#define MAX_FD_PER_TASK 16 // Bir uygulama aynı anda en fazla 8 dosya açabilir
 typedef struct task {
     unsigned int esp;
     unsigned int cr3;    

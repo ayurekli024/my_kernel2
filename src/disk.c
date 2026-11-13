@@ -1,3 +1,4 @@
+#pragma GCC optimize("no-strict-aliasing")
 #include "disk.h"
 #include "io.h"
 #include "string.h"
@@ -59,37 +60,63 @@ void init_disk() {
 }
 
 void ata_lba_read(unsigned int lba, unsigned char sector_count, unsigned short* target) {
-    if (sector_count == 0) sector_count = 1; // DONANIM KİLİDİ KORUMASI
-    
-    while ((inb(0x1F7) & 0x80)) {}
+    if (sector_count == 0) sector_count = 1;
+
     outb(0x1F6, 0xE0 | ((lba >> 24) & 0x0F));
+    inb(0x1F7); inb(0x1F7); inb(0x1F7); inb(0x1F7); // 400ns sürücü seçim gecikmesi
+
+    while (inb(0x1F7) & 0x80) {}
+
     outb(0x1F2, sector_count);
     outb(0x1F3, (unsigned char)(lba & 0xFF));
     outb(0x1F4, (unsigned char)((lba >> 8) & 0xFF));
     outb(0x1F5, (unsigned char)((lba >> 16) & 0xFF));
-    outb(0x1F7, 0x20); 
+    outb(0x1F7, 0x20); // Okuma komutu
+
     for (int j = 0; j < sector_count; j++) {
-        while (!(inb(0x1F7) & 0x08)) {}
-        for (int i = 0; i < 256; i++) { target[i] = inw(0x1F0); }
+        inb(0x1F7); inb(0x1F7); inb(0x1F7); inb(0x1F7); // 400ns BSY oturma gecikmesi
+        while (1) {
+            unsigned char status = inb(0x1F7);
+            if (status & 0x01) return; // Donanım hatasında kilitlenmeyi önle
+            if ((status & 0x80) == 0 && (status & 0x08) != 0) break;
+        }
+        for (int i = 0; i < 256; i++) {
+            target[i] = inw(0x1F0);
+        }
         target += 256;
     }
 }
 
 void ata_lba_write(unsigned int lba, unsigned char sector_count, unsigned short* source) {
-    if (sector_count == 0) sector_count = 1; // DONANIM KİLİDİ KORUMASI
-    
-    while ((inb(0x1F7) & 0x80)) {}
+    if (sector_count == 0) sector_count = 1;
+
     outb(0x1F6, 0xE0 | ((lba >> 24) & 0x0F));
+    inb(0x1F7); inb(0x1F7); inb(0x1F7); inb(0x1F7); // 400ns sürücü seçim gecikmesi
+
+    while (inb(0x1F7) & 0x80) {}
+
     outb(0x1F2, sector_count);
     outb(0x1F3, (unsigned char)(lba & 0xFF));
     outb(0x1F4, (unsigned char)((lba >> 8) & 0xFF));
     outb(0x1F5, (unsigned char)((lba >> 16) & 0xFF));
-    outb(0x1F7, 0x30); 
+    outb(0x1F7, 0x30); // Yazma komutu
+
     for (int j = 0; j < sector_count; j++) {
-        while (!(inb(0x1F7) & 0x08)) {}
-        for (int i = 0; i < 256; i++) { outw(0x1F0, source[i]); }
+        inb(0x1F7); inb(0x1F7); inb(0x1F7); inb(0x1F7); // 400ns BSY oturma gecikmesi
+        while (1) {
+            unsigned char status = inb(0x1F7);
+            if (status & 0x01) return;
+            if ((status & 0x80) == 0 && (status & 0x08) != 0) break;
+        }
+        for (int i = 0; i < 256; i++) {
+            outw(0x1F0, source[i]);
+        }
         source += 256;
     }
+
+    outb(0x1F7, 0xE7); // Cache Flush
+    inb(0x1F7); inb(0x1F7); inb(0x1F7); inb(0x1F7);
+    while (inb(0x1F7) & 0x80) {}
 }
 
 // Basit kernel-side debug yardimcisi: terminale yazdir
@@ -150,24 +177,25 @@ int ardaos_read_file(const char* filename, const char* ext, unsigned char* targe
     return -1; // Uygulama bulunamadı
 }
 
-// 2. ardaos_write_file FONKSİYONUNU TÜM KÖK DİZİNİ TARAYACAK ŞEKİLDE DEĞİŞTİRİN
+// ==========================================================
+// KUSURSUZ FAT16 YAZMA MOTORU
+// ==========================================================
 int ardaos_write_file(const char* filename, const char* ext, unsigned int size, unsigned char* source_buffer) {
-    if (size == 0 || size > 10240) size = 512; 
+    if (filename == 0 || filename[0] == '\0' || filename[0] == ' ') return -1; 
+    if (size == 0) size = 1; 
+    if (size > 10240) size = 512; 
     
     unsigned int root_sectors = (bpb.dir_entries * 32) / 512;
     if (root_sectors == 0) root_sectors = 32;
 
     directory_entry_t dir[16];
-    int target_sec = -1;
-    int target_slot = -1;
-    int target_cluster = -1;
+    int target_sec = -1, target_slot = -1, target_cluster = -1;
     
-    // 1. Dosya var mı kontrol et
     for (unsigned int s = 0; s < root_sectors; s++) {
         ata_lba_read(root_dir_start_lba + s, 1, (unsigned short*)dir);
         for (int i = 0; i < 16; i++) {
-            if (dir[i].name[0] == 0x00) break;
-            if (dir[i].name[0] == (char)0xE5) continue;
+            // ZIRH 3: Döngüyü kırma!
+            if (dir[i].name[0] == 0x00 || dir[i].name[0] == (char)0xE5) continue;
             if (strncmp(dir[i].name, filename, 8) == 0 && strncmp(dir[i].ext, ext, 3) == 0) {
                 target_sec = s; target_slot = i; target_cluster = dir[i].cluster;
                 if (target_cluster < 2) target_cluster = -1;
@@ -177,7 +205,6 @@ int ardaos_write_file(const char* filename, const char* ext, unsigned int size, 
         if (target_slot != -1) break;
     }
     
-    // 2. Yoksa boş bir yuva bul
     if (target_slot == -1) {
         for (unsigned int s = 0; s < root_sectors; s++) {
             ata_lba_read(root_dir_start_lba + s, 1, (unsigned short*)dir);
@@ -189,18 +216,17 @@ int ardaos_write_file(const char* filename, const char* ext, unsigned int size, 
             if (target_slot != -1) break;
         }
     }
+    
     if (target_slot == -1) return -1;
 
     ata_lba_read(root_dir_start_lba + target_sec, 1, (unsigned short*)dir);
 
-    // 3. Cluster tahsisi
     if (target_cluster == -1) {
         unsigned short fat_table[256];
         unsigned int fat_lba = bpb.reserved_sectors;
-        unsigned int fat_sectors = bpb.sectors_per_fat;
         int found_cluster = -1;
 
-        for (unsigned int fs = 0; fs < fat_sectors; fs++) {
+        for (unsigned int fs = 0; fs < bpb.sectors_per_fat; fs++) {
             ata_lba_read(fat_lba + fs, 1, fat_table);
             int start_c = (fs == 0) ? 2 : 0;
             for (int i = start_c; i < 256; i++) {
@@ -220,8 +246,6 @@ int ardaos_write_file(const char* filename, const char* ext, unsigned int size, 
         for(int i = 0; i < 8; i++) dir[target_slot].name[i] = filename[i];
         for(int i = 0; i < 3; i++) dir[target_slot].ext[i] = ext[i];
         dir[target_slot].attr = 0x00;
-        dir[target_slot].cluster = target_cluster;
-        dir[target_slot].size = 0;
         dir[target_slot].time = 0;
         dir[target_slot].date = 0;
     }
@@ -233,11 +257,22 @@ int ardaos_write_file(const char* filename, const char* ext, unsigned int size, 
     if (sectors_to_write == 0) sectors_to_write = 1;
     ata_lba_write(actual_lba, sectors_to_write, (unsigned short*)source_buffer);
 
+    dir[target_slot].cluster = target_cluster;
     dir[target_slot].size = size;
-    ata_lba_write(root_dir_start_lba + target_sec, 1, (unsigned short*)dir);
+
+    unsigned short sec_buf[256];
+    unsigned char* src_bytes = (unsigned char*)dir;
+    unsigned char* dst_bytes = (unsigned char*)sec_buf;
+    for (int b = 0; b < 512; b++) dst_bytes[b] = src_bytes[b];
+
+    ata_lba_write(root_dir_start_lba + target_sec, 1, sec_buf);
+
     return 0;
 }
 
+// ==========================================================
+// KUSURSUZ FAT16 LİSTELEME MOTORU (LS)
+// ==========================================================
 void ardaos_list_files(char* output_buffer) {
     unsigned int root_sectors = (bpb.dir_entries * 32) / 512;
     if (root_sectors == 0) root_sectors = 32;
@@ -249,8 +284,10 @@ void ardaos_list_files(char* output_buffer) {
     for (unsigned int s = 0; s < root_sectors; s++) {
         ata_lba_read(root_dir_start_lba + s, 1, (unsigned short*)dir);
         for (int i = 0; i < 16; i++) {
-            if (dir[i].name[0] == 0) return;
-            if (dir[i].name[0] == (char)0xE5 || dir[i].attr == 0x0F || dir[i].attr == 0x08) continue;
+            // ZIRH 2: Aramayı yarıda kesmeyi engelle
+            if (dir[i].name[0] == 0 || dir[i].name[0] == (char)0xE5) continue;
+            if (dir[i].attr == 0x0F || dir[i].attr == 0x08) continue;
+            
             found++;
             char temp_name[9]; char temp_ext[4];
             for(int j = 0; j < 8; j++) temp_name[j] = dir[i].name[j];
@@ -446,15 +483,17 @@ static int parse_path_node(const char** path, char* name_8, char* ext_3) {
     if (**path == '/' || **path == '\\') (*path)++;
     return 1; // Bir klasör veya dosya düğümü (Node) başarıyla okundu
 }
-// İç içe geçmiş yolu takip ederek hedef dosyayı/klasörü bulur
+// ==========================================================
+// KUSURSUZ FAT16 ARAMA MOTORU
+// ==========================================================
 int fat16_find_entry(const char* full_path, directory_entry_t* out_entry) {
     char name_8[8], ext_3[3];
     const char* current_path = full_path;
-    
     unsigned int current_dir_lba = root_dir_start_lba;
-    unsigned int dir_sectors = 32; // Root dizin varsayılan olarak 32 sektördür
     
-    // Yoldaki her bir düğümü (Klasör veya Dosya) sırayla tara
+    unsigned int dir_sectors = (bpb.dir_entries * 32) / 512;
+    if (dir_sectors == 0) dir_sectors = 32;
+    
     while (parse_path_node(&current_path, name_8, ext_3)) {
         int found = 0;
         directory_entry_t dir[16];
@@ -462,8 +501,11 @@ int fat16_find_entry(const char* full_path, directory_entry_t* out_entry) {
         for (unsigned int s = 0; s < dir_sectors; s++) {
             ata_lba_read(current_dir_lba + s, 1, (unsigned short*)dir);
             for (int i = 0; i < 16; i++) {
-                if (dir[i].name[0] == 0) break; // Klasörün sonu
-                if (dir[i].name[0] == (char)0xE5) continue; // Silinmiş dosya
+                // ZIRH 1: Disk boşluklarında (0x00) veya silinmişlerde (0xE5) döngüyü ASLA KIRMA!
+                if (dir[i].name[0] == 0 || dir[i].name[0] == (char)0xE5) continue; 
+                
+                // Uzun isimleri ve etiketleri atla
+                if (dir[i].attr == 0x0F || dir[i].attr == 0x08) continue;
                 
                 int name_match = 1, ext_match = 1;
                 for (int k = 0; k < 8; k++) if (dir[i].name[k] != name_8[k]) name_match = 0;
@@ -478,16 +520,15 @@ int fat16_find_entry(const char* full_path, directory_entry_t* out_entry) {
             if (found) break;
         }
         
-        if (!found) return -1; // Yolun bu kısmı kopuk (Dosya/Klasör yok)
+        if (!found) return -1; 
         
-        // Eğer hedef bulunmasına rağmen yol devam ediyorsa, bulduğumuz şey bir klasör olmalı!
         if (*current_path != '\0') {
-            if (!(out_entry->attr & 0x10)) return -1; // Klasör değil ama kullanıcı içine girmeye çalışıyor!
+            if (!(out_entry->attr & 0x10)) return -1; 
             current_dir_lba = cluster_to_lba(out_entry->cluster);
-            dir_sectors = bpb.sectors_per_cluster; // Alt klasörlerin boyutu Cluster kadardır
+            dir_sectors = bpb.sectors_per_cluster; 
         }
     }
-    return 0; // Dosya veya son klasör başarıyla bulundu
+    return 0; 
 }
 // ==========================================================
 // SANAL DOSYA SİSTEMİ (VFS) MOTORU

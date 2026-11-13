@@ -128,6 +128,13 @@ void _start() {
                     sys_print("Kullanim: cat <dosya_adi>\n");
                 } else {
                     int len = strlen(app_args);
+                    
+                    // 1. ZIRH: Kullanıcı "cat SES.WAV " yazdıysa sondaki görünmez boşlukları temizle
+                    while (len > 0 && app_args[len-1] == ' ') {
+                        app_args[len-1] = '\0';
+                        len--;
+                    }
+                    
                     if (len > 4 && (strcmp(&app_args[len-4], ".WAV") == 0 || strcmp(&app_args[len-4], ".wav") == 0 ||
                                     strcmp(&app_args[len-4], ".ELF") == 0 || strcmp(&app_args[len-4], ".elf") == 0 ||
                                     strcmp(&app_args[len-4], ".BIN") == 0 || strcmp(&app_args[len-4], ".bin") == 0)) {
@@ -149,6 +156,8 @@ void _start() {
                                     }
                                 }
                                 sys_print(read_buf);
+                                // 2. ZIRH: Devasa metinler yazdırılırken sistemin donmasını engellemek için işlemciye mola ver
+                                sys_sleep(1); 
                             }
                             sys_print("\n");
                             sys_close(fd);

@@ -54,9 +54,17 @@ void memset(void* dest, int val, int len) {
 
 void itoa(int n, char s[]) {
     char* real_s = PTR(s);
-    int i = 0;
+    int i = 0, is_negative = 0;
+    
     if (n == 0) { real_s[i++] = '0'; real_s[i] = '\0'; return; }
+    
+    // YENİ: Negatif sayı desteği!
+    if (n < 0) { is_negative = 1; n = -n; }
+    
     while (n > 0) { real_s[i++] = (n % 10) + '0'; n /= 10; }
+    
+    if (is_negative) real_s[i++] = '-';
+    
     real_s[i] = '\0';
     int start = 0, end = i - 1;
     while (start < end) { 

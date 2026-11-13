@@ -191,6 +191,73 @@ void draw_window(window_t* win) {
     draw_rect(win->x + win->w - 30, win->y, 30, 30, 0x00FF2D55); 
     draw_string(win->x + 10, win->y + 8, win->title, 0x00FFFFFF, title_color);
 }
+int get_title_button_rect(window_t* win, int target_b, int* out_x, int* out_y, int* out_w, int* out_h) {
+    int total_w = 0;
+    for (int b = 0; b < win->button_count; b++) {
+        if (win->button_in_titlebar[b]) {
+            int tlen = strlen(win->button_text[b]);
+            total_w += (tlen * 8 + 12) + 4;
+        }
+    }
+    if (total_w == 0) return 0;
+
+    int cur_x = (win->x + win->w - 30) - 4 - total_w;
+    int min_x = win->x + 14 + (strlen(win->title) * 8);
+
+    for (int b = 0; b < win->button_count; b++) {
+        if (win->button_in_titlebar[b]) {
+            int bw = strlen(win->button_text[b]) * 8 + 12;
+            if (b == target_b) {
+                if (cur_x < min_x) return 0; // Başlık yazısıyla çakışıyorsa çizme
+                *out_x = cur_x;
+                *out_y = win->y + 4;
+                *out_w = bw;
+                *out_h = 22;
+                return 1;
+            }
+            cur_x += bw + 4;
+        }
+    }
+    return 0;
+}
+
+void draw_title_buttons(window_t* win) {
+    if (!win->is_open || win->id < 2) return;
+    int is_focused = (win->id == gui->focused_window);
+
+    for (int b = 0; b < win->button_count; b++) {
+        if (!win->button_in_titlebar[b]) continue;
+        int bx, by, bw, bh;
+        if (!get_title_button_rect(win, b, &bx, &by, &bw, &bh)) continue;
+
+        int state = win->button_state[b];
+        unsigned int fill = is_focused ? 0x00005A9E : 0x005A5A5A;
+        unsigned int border_tl = is_focused ? 0x003399FF : 0x00888888;
+        unsigned int border_br = is_focused ? 0x00003866 : 0x003A3A3A;
+
+        if (is_focused && state == 2) { // Fare üzerinde (Hover)
+            fill = 0x001E88E5;
+            border_tl = 0x0066B2FF;
+        } else if (state == 1) { // Basılı (Pressed)
+            fill = is_focused ? 0x00003F73 : 0x00444444;
+            unsigned int tmp = border_tl;
+            border_tl = border_br;
+            border_br = tmp;
+        }
+
+        draw_rect(bx, by, bw, bh, fill);
+        draw_rect(bx, by, bw, 1, border_tl);
+        draw_rect(bx, by, 1, bh, border_tl);
+        draw_rect(bx, by + bh - 1, bw, 1, border_br);
+        draw_rect(bx + bw - 1, by, 1, bh, border_br);
+
+        int tlen = strlen(win->button_text[b]);
+        int tx = bx + (bw - (tlen * 8)) / 2;
+        int ty = by + (bh - 8) / 2;
+        if (state == 1) { tx++; ty++; }
+        draw_string(tx, ty, win->button_text[b], 0x00FFFFFF, fill);
+    }
+}
 void draw_taskbar() {
     draw_rect(0, 728, 1024, 40, 0x00111A);
     draw_rect(10, 732, 35, 32, 0x00333333); draw_string(22, 742, "<", 0x00FFFFFF, 0x00333333);
@@ -258,23 +325,55 @@ void process_mouse_events() {
             if (old_hover != gui->context_menu_hover_idx) gui->force_redraw = 1;
         }
 
+        // Fare tuşu basılı değilken mavi bar butonlarında Hover (üzerine gelme) efekti
+        if (!mouse_left_button && !gui->any_window_dragging && !gui->context_menu_open) {
+            for (int w = 2; w < MAX_WINDOWS; w++) {
+                if (!gui->windows[w].is_open || gui->windows[w].is_minimized) continue;
+                for (int b = 0; b < gui->windows[w].button_count; b++) {
+                    if (!gui->windows[w].button_in_titlebar[b]) continue;
+                    int bx, by, bw, bh;
+                    int hit = 0;
+                    if (get_title_button_rect(&gui->windows[w], b, &bx, &by, &bw, &bh)) {
+                        if (mouse_x >= bx && mouse_x <= bx + bw && mouse_y >= by && mouse_y <= by + bh) hit = 1;
+                    }
+                    int new_state = hit ? 2 : 0;
+                    if (gui->windows[w].button_state[b] != new_state) {
+                        gui->windows[w].button_state[b] = new_state;
+                        gui->force_redraw = 1;
+                    }
+                }
+            }
+        }
+
         if (mouse_left_button) {
+            int title_btn_clicked = 0;
+
             if (gui->focused_window >= 2 && !gui->any_window_dragging && !gui->context_menu_open) {
                 int w_idx = gui->focused_window;
                 int txt_x = gui->windows[w_idx].x + 10;
                 int txt_y = gui->windows[w_idx].y + 40;
-                // Buton isabet (Hit) kontrolü
+
+                // 1. Önce üst mavi bardaki ve pencere içindeki butonları kontrol et
                 for (int b = 0; b < gui->windows[w_idx].button_count; b++) {
-                    int bx = gui->windows[w_idx].x + gui->windows[w_idx].button_x[b];
-                    int by = gui->windows[w_idx].y + 32 + gui->windows[w_idx].button_y[b];
-                    if (mouse_x >= bx && mouse_x <= bx + gui->windows[w_idx].button_w[b] &&
-                        mouse_y >= by && mouse_y <= by + gui->windows[w_idx].button_h[b]) {
-                        gui->windows[w_idx].button_state[b] = 1; // Butonu göçert
+                    int bx, by, bw, bh;
+                    if (gui->windows[w_idx].button_in_titlebar[b]) {
+                        if (!get_title_button_rect(&gui->windows[w_idx], b, &bx, &by, &bw, &bh)) continue;
+                    } else {
+                        bx = gui->windows[w_idx].x + gui->windows[w_idx].button_x[b];
+                        by = gui->windows[w_idx].y + 32 + gui->windows[w_idx].button_y[b];
+                        bw = gui->windows[w_idx].button_w[b];
+                        bh = gui->windows[w_idx].button_h[b];
+                    }
+
+                    if (mouse_x >= bx && mouse_x <= bx + bw && mouse_y >= by && mouse_y <= by + bh) {
+                        gui->windows[w_idx].button_state[b] = 1;
+                        if (gui->windows[w_idx].button_in_titlebar[b]) title_btn_clicked = 1;
                         gui->force_redraw = 1;
                     }
                 }
-                // Fare pencerelerin metin alanının içindeyse
-                if (mouse_x >= txt_x && mouse_y >= txt_y && 
+
+                // 2. Pencere metin alanı seçimi
+                if (!title_btn_clicked && mouse_x >= txt_x && mouse_y >= txt_y && 
                     mouse_x <= gui->windows[w_idx].x + gui->windows[w_idx].w - 10 &&
                     mouse_y <= gui->windows[w_idx].y + gui->windows[w_idx].h - 10) {
                     
@@ -288,7 +387,8 @@ void process_mouse_events() {
                     gui->force_redraw = 1;
                 }
             }
-            if (!gui->any_window_dragging) {
+
+            if (!gui->any_window_dragging && !title_btn_clicked) {
                 if (gui->context_menu_open) {
                     if (mouse_x >= 55 && mouse_x <= 175 && mouse_y >= 638 && mouse_y < 728) {
                         int action = (mouse_y - 638) / 30;
@@ -381,16 +481,14 @@ void process_mouse_events() {
                 add_dirty_rect(gui->windows[gui->focused_window].x, gui->windows[gui->focused_window].y, gui->windows[gui->focused_window].w, gui->windows[gui->focused_window].h);
             }
         } else {
-            // Fare sol tuşu bırakıldığında basılı butonları serbest bırak ve olay (Event) fırlat!
             for (int i = 0; i < MAX_WINDOWS; i++) {
                 gui->windows[i].is_dragging = 0;
                 if (gui->windows[i].is_open) {
                     for(int b = 0; b < gui->windows[i].button_count; b++) {
                         if (gui->windows[i].button_state[b] == 1) {
-                            gui->windows[i].button_state[b] = 0; // Butonu eski haline getir
+                            gui->windows[i].button_state[b] = 0;
                             gui->force_redraw = 1;
                             
-                            // UYGULAMAYA SİNYAL FIRLAT!
                             if (gui->windows[i].event_count < 20) {
                                 gui->windows[i].event_type[gui->windows[i].event_count] = 1; 
                                 gui->windows[i].event_id[gui->windows[i].event_count] = b;
@@ -401,7 +499,7 @@ void process_mouse_events() {
                 }
             }
             gui->any_window_dragging = 0;
-            is_selecting = 0; // Seçim modunu sıfırla
+            is_selecting = 0;
         }
         
         add_dirty_rect(mouse_x, mouse_y, 16, 16);
@@ -429,7 +527,8 @@ void render_gui() {
         int w_idx = draw_order[i];
         if (!gui->windows[w_idx].is_open || gui->windows[w_idx].is_minimized) continue;
         
-        draw_window(&gui->windows[w_idx]); 
+        draw_window(&gui->windows[w_idx]);
+        draw_title_buttons(&gui->windows[w_idx]);
         set_clipping_rect(gui->windows[w_idx].x + 2, gui->windows[w_idx].y + 32, gui->windows[w_idx].w - 4, gui->windows[w_idx].h - 34);
 
         if (w_idx == 0) { 
@@ -490,6 +589,7 @@ void render_gui() {
         }
         // YENİ: 3D Buton Render Motoru
             for (int b = 0; b < gui->windows[w_idx].button_count; b++) {
+                if (gui->windows[w_idx].button_in_titlebar[b]) continue;
                 int bx = gui->windows[w_idx].x + gui->windows[w_idx].button_x[b];
                 int by = gui->windows[w_idx].y + 32 + gui->windows[w_idx].button_y[b];
                 int bw = gui->windows[w_idx].button_w[b];

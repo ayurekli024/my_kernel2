@@ -501,6 +501,7 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
                 if (b < 20) {
                     gui->windows[i].button_x[b] = arg1; gui->windows[i].button_y[b] = arg2;
                     gui->windows[i].button_w[b] = arg3; gui->windows[i].button_h[b] = arg4;
+                    gui->windows[i].button_in_titlebar[b] = 0;
                     
                     unsigned int base = current_task->app_base;
                     const char* text = (unsigned int)arg5 < 0x100000 ? (const char*)(base + arg5) : (const char*)arg5;
@@ -565,6 +566,30 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         extern void sleep_task(unsigned int ms);
         sleep_task(arg1);
         return 1;
+    }
+    // API No 44: Üst Mavi Başlık Barına Buton Ekle
+    else if (sys_num == 44) {
+        for (int i = 2; i < MAX_WINDOWS; i++) {
+            if (gui->windows[i].is_open && gui->windows[i].owner_task_id == current_task->id) {
+                int b = gui->windows[i].button_count;
+                if (b < 20) {
+                    gui->windows[i].button_x[b] = 0; gui->windows[i].button_y[b] = 0;
+                    gui->windows[i].button_w[b] = 0; gui->windows[i].button_h[b] = 0;
+                    gui->windows[i].button_in_titlebar[b] = 1;
+
+                    unsigned int base = current_task->app_base;
+                    const char* text = (unsigned int)arg1 < 0x100000 ? (const char*)(base + arg1) : (const char*)arg1;
+                    int k = 0; while (text[k] && k < 15) { gui->windows[i].button_text[b][k] = text[k]; k++; }
+                    gui->windows[i].button_text[b][k] = '\0';
+
+                    gui->windows[i].button_state[b] = 0;
+                    gui->windows[i].button_count++;
+                    gui->force_redraw = 1;
+                    return b;
+                }
+            }
+        }
+        return -1;
     }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
     return -1;

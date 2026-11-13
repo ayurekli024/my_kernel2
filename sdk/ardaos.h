@@ -28,7 +28,8 @@ typedef struct {
     int button_x[20]; int button_y[20];
     int button_w[20]; int button_h[20];
     char button_text[20][16];
-    int button_state[20]; 
+    int button_state[20];
+    int button_in_titlebar[20]; 
     
     int event_count;
     int event_type[20]; 
@@ -199,5 +200,10 @@ static inline void sys_clear_gui(void) {
 }
 static inline void sys_sleep(unsigned int ms) {
     __asm__ __volatile__ ("int $0x80" : : "a"(43), "b"(ms));
+}
+static inline int sys_create_title_button(const char* text) {
+    int btn_id;
+    __asm__ __volatile__ ("int $0x80" : "=a"(btn_id) : "a"(44), "b"((unsigned int)text));
+    return btn_id;
 }
 #endif

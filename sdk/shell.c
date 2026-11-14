@@ -22,7 +22,7 @@ int atoi(const char* str) {
 
 void _start() {
     sys_print("===================================\n");
-    sys_print("  ArdaOS Shell v1.2 (User Space)   \n");
+    sys_print("  ArdaOS Shell v1.3 (User Space)   \n");
     sys_print("===================================\n");
 
     char cmd[256];
@@ -52,7 +52,7 @@ void _start() {
 
             // [ SİSTEM BİLGİSİ VE YÖNETİM ]
             if (strcmp(cmd, "info") == 0) {
-                sys_print("Sistem: ArdaOS V1.2\nMimari: 32-bit x86\nFS: FAT16 (VFS Hiyerarsik)\n");
+                sys_print("Sistem: ArdaOS V1.3\nMimari: 32-bit x86\nFS: FAT16 (VFS Hiyerarsik)\n");
             } 
             else if (strcmp(cmd, "temizle") == 0 || strcmp(cmd, "clear") == 0) {
                 sys_clear_terminal();

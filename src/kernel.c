@@ -419,7 +419,6 @@ void kernel_main(unsigned int magic, struct multiboot_info* mb_info) {
     strcpy(gui->user_input, "Arda> ");
     gui->input_idx = 6;
     
-    terminal_print("ArdaOS V1.1 Multitasking'e Hos Geldiniz!");
     __asm__ __volatile__ ("sti");
     extern void init_sb16(void);
     init_sb16();

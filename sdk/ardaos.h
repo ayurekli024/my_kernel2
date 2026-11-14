@@ -206,4 +206,15 @@ static inline int sys_create_title_button(const char* text) {
     __asm__ __volatile__ ("int $0x80" : "=a"(btn_id) : "a"(44), "b"((unsigned int)text));
     return btn_id;
 }
+static inline int sys_copy_file(const char* src, const char* dst) {
+    int ret;
+    __asm__ __volatile__ ("int $0x80" : "=a"(ret) : "a"(45), "b"((unsigned int)src), "c"((unsigned int)dst));
+    return ret;
+}
+
+static inline int sys_delete_path(const char* path) {
+    int ret;
+    __asm__ __volatile__ ("int $0x80" : "=a"(ret) : "a"(46), "b"((unsigned int)path));
+    return ret;
+}
 #endif

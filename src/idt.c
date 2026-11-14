@@ -591,6 +591,21 @@ int syscall_handler_main(unsigned int sys_num, unsigned int arg1, unsigned int a
         }
         return -1;
     }
+    // API No 45: Yol tabanlı dosya kopyalama (sys_copy_file)
+    else if (sys_num == 45) {
+        extern int ardaos_copy_file(const char*, const char*);
+        unsigned int base = current_task->app_base;
+        const char* real_src = (unsigned int)arg1 < 0x100000 ? (const char*)(base + arg1) : (const char*)arg1;
+        const char* real_dst = (unsigned int)arg2 < 0x100000 ? (const char*)(base + arg2) : (const char*)arg2;
+        return ardaos_copy_file(real_src, real_dst);
+    }
+    // API No 46: Yol tabanlı dosya/klasör silme (sys_delete_path)
+    else if (sys_num == 46) {
+        extern int ardaos_delete_path(const char*);
+        unsigned int base = current_task->app_base;
+        const char* real_path = (unsigned int)arg1 < 0x100000 ? (const char*)(base + arg1) : (const char*)arg1;
+        return ardaos_delete_path(real_path);
+    }
     // Bilinmeyen API numarası gelirse hata kodu (-1) döndür
     return -1;
 }

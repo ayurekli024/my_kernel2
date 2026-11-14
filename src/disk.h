@@ -44,4 +44,6 @@ int vfs_write(int fd, unsigned char* buffer, int count);
 void vfs_close(int fd);
 int vfs_list_dir(const char* path, char* buffer);
 
+int ardaos_delete_path(const char* full_path);
+int ardaos_copy_file(const char* src_path, const char* dst_path);
 #endif

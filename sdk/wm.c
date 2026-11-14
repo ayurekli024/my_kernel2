@@ -196,26 +196,26 @@ int get_title_button_rect(window_t* win, int target_b, int* out_x, int* out_y, i
     for (int b = 0; b < win->button_count; b++) {
         if (win->button_in_titlebar[b]) {
             int tlen = strlen(win->button_text[b]);
-            total_w += (tlen * 8 + 12) + 4;
+            total_w += (tlen * 8 + 10) + 3;
         }
     }
     if (total_w == 0) return 0;
 
     int cur_x = (win->x + win->w - 30) - 4 - total_w;
-    int min_x = win->x + 14 + (strlen(win->title) * 8);
+    int min_x = win->x + 12 + (strlen(win->title) * 8);
 
     for (int b = 0; b < win->button_count; b++) {
         if (win->button_in_titlebar[b]) {
-            int bw = strlen(win->button_text[b]) * 8 + 12;
+            int bw = strlen(win->button_text[b]) * 8 + 10;
             if (b == target_b) {
-                if (cur_x < min_x) return 0; // Başlık yazısıyla çakışıyorsa çizme
+                if (cur_x < min_x) return 0;
                 *out_x = cur_x;
                 *out_y = win->y + 4;
                 *out_w = bw;
                 *out_h = 22;
                 return 1;
             }
-            cur_x += bw + 4;
+            cur_x += bw + 3;
         }
     }
     return 0;
@@ -252,8 +252,8 @@ void draw_title_buttons(window_t* win) {
         draw_rect(bx + bw - 1, by, 1, bh, border_br);
 
         int tlen = strlen(win->button_text[b]);
-        int tx = bx + (bw - (tlen * 8)) / 2;
-        int ty = by + (bh - 8) / 2;
+        int tx = bx + (bw - (tlen * 10)) / 3;
+        int ty = by + (bh - 10) / 3;
         if (state == 1) { tx++; ty++; }
         draw_string(tx, ty, win->button_text[b], 0x00FFFFFF, fill);
     }
@@ -326,11 +326,14 @@ void process_mouse_events() {
         }
 
         // Fare tuşu basılı değilken mavi bar butonlarında Hover (üzerine gelme) efekti
+        // Fare tuşu basılı değilken mavi bar butonlarında Hover (üzerine gelme) efekti
         if (!mouse_left_button && !gui->any_window_dragging && !gui->context_menu_open) {
             for (int w = 2; w < MAX_WINDOWS; w++) {
                 if (!gui->windows[w].is_open || gui->windows[w].is_minimized) continue;
                 for (int b = 0; b < gui->windows[w].button_count; b++) {
                     if (!gui->windows[w].button_in_titlebar[b]) continue;
+                    if (gui->windows[w].button_state[b] == 1) continue; // Basılı butonu ezme
+
                     int bx, by, bw, bh;
                     int hit = 0;
                     if (get_title_button_rect(&gui->windows[w], b, &bx, &by, &bw, &bh)) {
